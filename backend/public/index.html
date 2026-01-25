@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Ghost Client</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f0f2f5; }
+        #user-list { margin-top: 20px; }
+        .user-badge { 
+            background: white; 
+            padding: 10px; 
+            margin: 5px 0; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <h1>Ghost Client (Laptop)</h1>
+    <p id="status">Connecting...</p>
+    
+    <div id="user-list">
+        <h3>People in Lobby:</h3>
+        <div id="list-container"></div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const listContainer = document.getElementById('list-container');
+
+        socket.on('connect', () => {
+            document.getElementById('status').innerText = "Connected! ID: " + socket.id;
+            
+            // 1. AUTO-REGISTER THE LAPTOP
+            // This lets the laptop "take" a name and color immediately for testing
+            socket.emit('register-user', { 
+                name: "Laptop-Ghost", 
+                color: "rebeccapurple" 
+            });
+        });
+
+        // 2. LISTEN FOR USER UPDATES (Replaces 'announcement')
+        socket.on('user-update', (users) => {
+            console.log("Users currently online:", users);
+            
+            // Clear the list and rebuild it
+            listContainer.innerHTML = '';
+            
+            users.forEach(user => {
+                const badge = document.createElement('div');
+                badge.className = 'user-badge';
+                badge.style.borderLeft = `6px solid ${user.color}`;
+                
+                // Show "You" if it's the laptop's ID
+                const isMe = user.id === socket.id ? " (You)" : "";
+                
+                badge.innerHTML = `
+                    <strong>${user.name}${isMe}</strong><br>
+                    <small style="color: grey;">${user.id}</small>
+                `;
+                listContainer.appendChild(badge);
+            });
+        });
+    </script>
+</body>
+</html>

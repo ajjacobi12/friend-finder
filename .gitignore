@@ -1,1 +1,14 @@
-node_modules/
+# Ignore dependencies
+**/node_modules/
+
+# Ignore Expo files
+frontend/.expo/
+frontend/web-build/
+
+# Ignore environment secrets (if you have them)
+.env
+backend/.env
+
+# Ignore OS-specific junk
+.DS_Store
+Thumbs.db
