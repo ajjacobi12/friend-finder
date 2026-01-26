@@ -7,7 +7,7 @@ export const styles = StyleSheet.create({
         flex: 1, // tells view to expand and fill entire screen
         backgroundColor: '#f2f2f7', // light grey background
         alignItems: 'center', // centers all the children (labels, cards) horizontally 
-        // justifyContent: 'center', // centers everything vertically
+        justifyContent: 'flex-start', // centers everything vertically
         paddingTop: 10, //manual centering for top portion
         paddingHorizontal: 20, //leaves a gap of 20 units between screen edge and content
     },
@@ -42,6 +42,13 @@ export const styles = StyleSheet.create({
         borderRadius: 20,
         width: '100%',
     },
+    box: {
+        backgroundColor: 'lightgrey',
+        padding: 15,
+        borderRadius: 20,
+        width: '60%',
+        marginTop: 15
+    },
     cardTitle: {
         fontSize: 14,
         color: '#3a3a3c',
@@ -71,5 +78,36 @@ export const styles = StyleSheet.create({
         fontSize: 15,
         color: '#3a3a3c',
         fontFamily: 'Courier'
-    }
+    },
+    input: {
+        fontSize: 20,
+        color: 'black',
+
+    },
+    colorContainer: {
+        flexDirection: 'row',        // Lays circles out in a horizontal line
+        flexWrap: 'wrap',
+        justifyContent: 'center',    // Centers them horizontally
+        marginVertical: 20,          // Adds space above and below the row
+        gap: 15,                     // Adds space between the circles
+    },
+    colorCircle: {
+        width: 45,                   // Size of the circle
+        height: 45,
+        borderRadius: 22.5,          // Makes it a perfect circle (half of width)
+        borderColor: '#000',         // Black border for the "selected" look
+    },
+    button: {
+        backgroundColor: '#007aff',  // Nice iOS-style blue
+        paddingVertical: 15,
+        paddingHorizontal: 40,
+        borderRadius: 10,
+        marginTop: 20,
+        alignItems: 'center',
+    },
+    buttonText: {
+        color: '#fff',               // White text on the blue button
+        fontSize: 18,
+        fontWeight: 'bold',
+  },
 });

@@ -1,66 +1,133 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Ghost Client</title>
+    <title>Socket Test Dashboard</title>
+    <script src="/socket.io/socket.io.js"></script>
     <style>
-        body { font-family: sans-serif; padding: 20px; background: #f0f2f5; }
-        #user-list { margin-top: 20px; }
-        .user-badge { 
-            background: white; 
-            padding: 10px; 
-            margin: 5px 0; 
-            border-radius: 8px; 
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 30px; background-color: #f4f4f9; }
+        .container { max-width: 500px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .status { padding: 10px; margin-bottom: 20px; border-radius: 6px; text-align: center; font-weight: bold; }
+        .online { background: #d4edda; color: #155724; }
+        .offline { background: #f8d7da; color: #721c24; }
+        .card { border-top: 2px solid #eee; padding-top: 15px; margin-top: 15px; }
+        input { width: 70%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px; }
+        button { padding: 10px 15px; cursor: pointer; border: none; border-radius: 4px; font-weight: bold; transition: 0.2s; }
+        .btn-create { background: #28a745; color: white; }
+        .btn-join { background: #007bff; color: white; }
+        .btn-leave { background: #dc3545; color: white; width: 100%; margin-top: 10px; }
+        button:hover { opacity: 0.8; }
+        ul { list-style: none; padding: 0; }
+        li { padding: 8px; border-bottom: 1px solid #eee; display: flex; align-items: center; }
+        .color-dot { width: 12px; height: 12px; border-radius: 50%; margin-right: 10px; }
     </style>
 </head>
 <body>
-    <h1>Ghost Client (Laptop)</h1>
-    <p id="status">Connecting...</p>
-    
-    <div id="user-list">
-        <h3>People in Lobby:</h3>
-        <div id="list-container"></div>
+
+<div class="container">
+    <h2>🛠 Room Control Center</h2>
+    <div id="status" class="status offline">Connecting...</div>
+
+    <div class="card">
+        <h3>Create Session</h3>
+        <input type="text" id="createIdInput" placeholder="New Room ID (e.g. 9999)">
+        <button class="btn-create" onclick="createSession()">Create</button>
     </div>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script>
-        const socket = io();
-        const listContainer = document.getElementById('list-container');
+    <div id="joinArea" class="card">
+        <h3>Join Session</h3>
+        <input type="text" id="joinIdInput" placeholder="Existing Room ID">
+        <button class="btn-join" onclick="joinSession()">Join</button>
+    </div>
 
-        socket.on('connect', () => {
-            document.getElementById('status').innerText = "Connected! ID: " + socket.id;
-            
-            // 1. AUTO-REGISTER THE LAPTOP
-            // This lets the laptop "take" a name and color immediately for testing
-            socket.emit('register-user', { 
-                name: "Laptop-Ghost", 
-                color: "rebeccapurple" 
-            });
-        });
+    <div id="roomArea" class="card" style="display:none;">
+        <h3>Session: <span id="currentRoomDisplay"></span></h3>
+        <p>Active Users:</p>
+        <ul id="userList"></ul>
+        <button class="btn-leave" onclick="leaveSession()">🚪 Leave Session</button>
+    </div>
+</div>
 
-        // 2. LISTEN FOR USER UPDATES (Replaces 'announcement')
-        socket.on('user-update', (users) => {
-            console.log("Users currently online:", users);
-            
-            // Clear the list and rebuild it
-            listContainer.innerHTML = '';
-            
-            users.forEach(user => {
-                const badge = document.createElement('div');
-                badge.className = 'user-badge';
-                badge.style.borderLeft = `6px solid ${user.color}`;
-                
-                // Show "You" if it's the laptop's ID
-                const isMe = user.id === socket.id ? " (You)" : "";
-                
-                badge.innerHTML = `
-                    <strong>${user.name}${isMe}</strong><br>
-                    <small style="color: grey;">${user.id}</small>
-                `;
-                listContainer.appendChild(badge);
-            });
+<script>
+    const socket = io();
+    let myCurrentRoom = null;
+
+    // --- UI Logic ---
+    const statusDiv = document.getElementById('status');
+    const userListUl = document.getElementById('userList');
+    const roomArea = document.getElementById('roomArea');
+    const joinArea = document.getElementById('joinArea');
+
+    socket.on('connect', () => {
+        statusDiv.innerText = "Connected as: " + socket.id;
+        statusDiv.className = "status online";
+    });
+
+    socket.on('disconnect', () => {
+        statusDiv.innerText = "Disconnected";
+        statusDiv.className = "status offline";
+    });
+
+    // --- 1. Create Session ---
+    function createSession() {
+        const roomID = document.getElementById('createIdInput').value;
+        if (!roomID) return alert("Enter an ID!");
+        
+        socket.emit('create-session', roomID);
+        setupInRoom(roomID);
+    }
+
+    // --- 2. Join Session ---
+    function joinSession() {
+        const roomID = document.getElementById('joinIdInput').value;
+        if (!roomID) return alert("Enter an ID!");
+
+        socket.emit('join-session', roomID, (response) => {
+            if (response && response.exists) {
+                setupInRoom(roomID);
+            } else {
+                alert("Room not found!");
+            }
         });
-    </script>
+    }
+
+    // --- 3. Leave Session ---
+    function leaveSession() {
+        if (myCurrentRoom) {
+            socket.emit('leave-session', myCurrentRoom);
+            alert("Left room " + myCurrentRoom);
+            location.reload(); // Simplest way to reset the UI
+        }
+    }
+
+    function setupInRoom(roomID) {
+        myCurrentRoom = roomID;
+        document.getElementById('currentRoomDisplay').innerText = roomID;
+        roomArea.style.display = 'block';
+        joinArea.style.display = 'none';
+
+        // Register as a user so the phone sees us
+        socket.emit('update-user', { 
+            name: "Web Tester", 
+            color: "#1e8fff", 
+            sessionId: roomID 
+        });
+    }
+
+    // --- Listeners ---
+    socket.on('user-update', (users) => {
+        userListUl.innerHTML = '';
+        users.forEach(user => {
+            const li = document.createElement('li');
+            li.innerHTML = `<div class="color-dot" style="background:${user.color}"></div> 
+                            <strong>${user.name}</strong> ${user.id === socket.id ? '(You)' : ''}`;
+            userListUl.appendChild(li);
+        });
+    });
+
+    socket.on('session-terminated', () => {
+        alert("The session was closed by the server.");
+        location.reload();
+    });
+</script>
 </body>
 </html>
