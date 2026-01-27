@@ -5,7 +5,7 @@
 // --- IMPORTS ----
 import React from 'react';
 import { TouchableOpacity, Text } from 'react-native';
-import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native'; // manages app state and links app to phone's back button
+import { DefaultTheme, NavigationContainer, createNavigationContainerRef } from '@react-navigation/native'; // manages app state and links app to phone's back button
 import { createNativeStackNavigator } from '@react-navigation/native-stack'; // creates a mechanism where screens behave like a deck of cards
 import { UserProvider } from './UserContext' // "global memory", wrapping everything in this, every screen can access the same data without having to pass it manually every time
 import { navigationRef } from './navigationService';
@@ -21,15 +21,30 @@ import InitialScreen from './screens/LoginScreen'
 // two components: stack.navigator (the manager) and stack.screen (the individual pages)
 const Stack = createNativeStackNavigator();
 
+const myTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    background: '#ffffff',
+    card: '#ffffff',
+  },
+};
+
 export default function App() { 
   return (
     <UserProvider> 
         {/* wrapping in this to allow global access of user data */}
 
-        <NavigationContainer ref={navigationRef}>
+        <NavigationContainer ref={navigationRef} theme={myTheme}>
         {/* wrapping in this to allow navigator to manage which screen is currently visible */}
 
-            <Stack.Navigator initialRouteName="Login">
+            <Stack.Navigator 
+              initialRouteName="Login"
+              screenOptions={{
+                headerStyle: { backgroundColor: '#ffffff' },
+                contentStyle: { backgroundColor: '#ffffff' },
+              }}>
+
                 {/* initialRouteName dictates which screen first pops up upon opening app */}
                 
                 {/* ---- DEFINING THE SCREENS ---- */}

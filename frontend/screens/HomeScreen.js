@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect } from 'react'; // useState lets app remember things (eg. messages), useEffect allows app to perform actions (eg. connecting ot the server) as soon as it opens
-import { Text, View, StatusBar, TouchableOpacity, TextInput } from 'react-native'; // components; similar to HTML's tags <div> or <h1>, view = <div>, text for all strings
+import { Text, View, StatusBar, TouchableOpacity } from 'react-native'; // components; similar to HTML's tags <div> or <h1>, view = <div>, text for all strings
 import { styles } from '../styles';
 import { useUser } from '../UserContext';
 //import { TextInput } from 'react-native-web';
@@ -24,15 +24,22 @@ export default function HomeScreen({ navigation }) {
   useLayoutEffect(() => {
     navigation.setOptions({
       headerBackVisible: false,
+      headerStyle: {
+        backgroundColor: '#ffffff',
+        elevation: 0,
+        shadowOpacity: 0,
+      },
       headerLeft: () => (
-        <TouchableOpacity onPress={() => navigation.navigate('Profile')}  // () => means do this only when button is pressed
-                          style={{ marginLeft: 5, paddingHorizontal: 5, color: '#ccc'}}>
-          <Text style={{ marginLeft: -5, color: '#007aff', fontWeight: 'bold',fontSize: 20}}>Profile</Text>
+        <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => navigation.navigate('Profile')}  // () => means do this only when button is pressed
+            style={{ marginLeft: 5, paddingHorizontal: 5, backgroundColor: '#ffffff'}}>
+          <Text style={{ color: '#007aff', fontWeight: 'bold',fontSize: 20}}>Profile</Text>
         </TouchableOpacity>
       ),
       headerRight: () => (
         <TouchableOpacity onPress={onLeave}  // () => means do this only when button is pressed
-                          style={{ marginLeft: 5, paddingHorizontal: 5, color: '#ccc'}}>
+                          style={{ marginLeft: 5, paddingHorizontal: 5, backgroundColor: '#ffffff'}}>
           <Text style={{ marginLeft: -5, color: '#ff0000', fontWeight: 'bold', fontSize: 20}}>Leave</Text>
         </TouchableOpacity>
       ),
@@ -101,7 +108,7 @@ export default function HomeScreen({ navigation }) {
                     .map((friend) => (
                     // only show friend if it isn't me
                         <View key={friend.id} 
-                            style={[styles.friendBadge, { borderColor: friend.color, borderWidth: 2 }]}>
+                            style={[styles.friendBadge, { borderColor: friend.color || '#ccc', borderWidth: 2 }]}>
                             <Text style={styles.friendIdText}>
                                 👤 {friend.name} 
                             </Text>

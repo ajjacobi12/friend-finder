@@ -22,25 +22,58 @@ let activeSessions = {};
 let roomTimeoutRefs ={};
 
 // helper to broadcast to everyone in a room to update their UI
-const broadcastUpdate = (roomID) => {
+const broadcastUpdate = (roomID, logMessage) => {
     if (!roomID) return;
     const usersInRoom = Object.values(activeUsers).filter(u => u.sessionId === roomID);
     io.to(roomID).emit('user-update', usersInRoom);
+
+    console.log(`--- ROOM UPDATE: ${roomID} ----`);
+    console.log(logMessage);
+    console.log(`Current Active Users: ${usersInRoom.length}`);
+    console.log(JSON.stringify(usersInRoom, null, 2));
+    console.log('------------------------------');
+};
+
+const handleUserJoiningRoom = (socket, roomID) => {
+    // Stop the deletion timer if it's running
+    cancelRoomDeletion(roomID);
+
+    socket.join(roomID);
+    activeSessions[roomID] = true;
+    if (!activeUsers[socket.id]) {
+        activeUsers[socket.id] = { 
+            id: socket.id,
+            name: "New User",
+            color: "#cccccc",
+            sessionId: roomID
+         };
+    } else {
+    activeUsers[socket.id].sessionId = roomID;
+    }
 };
 
 // helper to handle the "empty room" timer
 const handleRoomCleanup = (roomID) => {
-    if (activeSessions[roomID]) activeSessions[roomID] -= 1;
+    if (!roomID) return;
+
+    const room = io.sockets.adapter.rooms.get(roomID);
+    const numClients = room ? room.size : 0;
     
-    if (activeSessions[roomID] <= 0) {
+    if (numClients <= 0) {
         console.log(`Room ${roomID} is empty. Starting 5-minute deletion timer...`);
+        if (roomTimeoutRefs[roomID]) clearTimeout(roomTimeoutRefs[roomID]);
 
         roomTimeoutRefs[roomID] = setTimeout(() => {
-            if (activeSessions[roomID] <= 0) {
-                io.to(roomID).emit('session-terminated');
+            const finalCheck = io.sockets.adapter.rooms.get(roomID);
+            if (!finalCheck || finalCheck.size <= 0) {
                 delete activeSessions[roomID];
                 delete roomTimeoutRefs[roomID];
-                console.log(`Room ${roomID} permanently removed.`)
+                Object.keys(activeUsers).forEach(id => {
+                    if (activeUsers[id].sessionId === roomID) {
+                        delete activeUsers[id];
+                    }
+                });
+                console.log(`Room ${roomID} has been deleted due to inactivity.`);
             }
         }, 300000); // 5 minutes
     }
@@ -54,15 +87,6 @@ const cancelRoomDeletion = (roomID) => {
     }
 };
 
-const handleUserJoiningRoom = (socket, roomID) => {
-    // Stop the deletion timer if it's running
-    cancelRoomDeletion(roomID);
-
-    socket.join(roomID);
-    socket.currentRoom = roomID;
-    activeSessions[roomID] = (activeSessions[roomID] || 0) + 1;
-    console.log(`Room ${roomID} count is now: ${activeSessions[roomID]}`);
-};
 
 // 3. handle live connections
 io.on('connection', (socket) => { // an event listener -- waits for user to open the app, and when opened, it triggers a function that gives that specific user a unique "socket" object (their personal "phone line" to the server)
@@ -77,19 +101,22 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
 
     // ---- JOIN A SESSION ----
     socket.on('join-session', (roomID, callback) => {
-        const sessionExists = !!activeSessions[roomID];
+        console.log(`Request to join room: ${roomID} from ${socket.id}`);
 
-        if (sessionExists) {  // checks to see if roomID actually exists/is active
-            const usersInRoom = Object.values(activeUsers).filter(u => u.sessionId === roomID);
-            
+        if (activeSessions[roomID] != undefined) {  // checks to see if roomID actually exists/is active            
             handleUserJoiningRoom(socket, roomID);
-            console.log(`User ${socket.id} joined room ${roomID}`);
+
+            const usersInRoom = Object.values(activeUsers).filter(u => u.sessionId === roomID);
+            broadcastUpdate(roomID, `User ${socket.id} joined room ${roomID}`);
 
             if(typeof callback == 'function') {
                 callback({ exists: true, currentUsers: usersInRoom });
             }
         } else {
+            console.log(`Failed: Room ${roomID} does not exist.`);
+            if(typeof callback == 'function') { 
             callback({ exists : false });
+            }
         }
     });
 
@@ -98,19 +125,24 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
         // save/update user data
         // profile = { name: ..., color: ...}
         activeUsers[socket.id] = { ...profile, id: socket.id };
-
         // broadcast refreshed list to everyone in that session
-        broadcastUpdate(profile.sessionId);
-        console.log(`User ${profile.name} updated in room ${profile.sessionId}`);
+        broadcastUpdate(profile.sessionId, `User ${profile.sessionId} (${profile.name}) updated their profile.`);
     });
 
     // --- CASE 1: leave session (exit room)
         socket.on('leave-session', (roomID) => {
+            if (!activeUsers[socket.id]) return; // if user is gone, do nothing
+
+            const userName = activeUsers[socket.id].name || socket.id;
+
             delete activeUsers[socket.id];  // free the data
+            
+            broadcastUpdate(roomID, `User ${socket.id} (${userName}) left room ${roomID}`);
             socket.leave(roomID);  // stop hearing room updates
-            handleRoomCleanup(roomID); // drop count and start time
-            broadcastUpdate(roomID);  // update friends' list
-            console.log(`User ${socket.id} left room ${roomID}`);
+
+            setTimeout(() => {
+                handleRoomCleanup(roomID); // drop count and start time
+            }, 50);         
         });
 
     // ---- CASE 2: DISCONNECT (eg. unexpected exits, closing the app) ----------
@@ -118,10 +150,14 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
         const user = activeUsers[socket.id];
         if (user) {
             const roomID = user.sessionId;
+            const userName = user.name || socket.id;
+
             delete activeUsers[socket.id];
-            handleRoomCleanup(roomID);
-            broadcastUpdate(roomID);
-            console.log(`User left ${roomID}. Remaining: ${activeSessions[roomID]}`);
+
+            setTimeout(() => {
+                handleRoomCleanup(roomID);
+                broadcastUpdate(roomID, `User ${socket.id} (${userName}) left room ${roomID}`);
+            }, 50);
         }
     });
 });
