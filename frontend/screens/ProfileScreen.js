@@ -10,30 +10,51 @@ import { useUser } from '../UserContext';
 export default function ProfileScreen({ navigation }) {
     // grab "setter" functions from Context
     const { name, setName, selectedColor, setSelectedColor, hasRegistered, 
-        setHasRegistered, secureEmit, sessionId, handleCleanExit, friends, socket } = useUser();
+        setHasRegistered, secureEmit, sessionId, handleCleanExit, sessionUsers, socket } = useUser();
 
     const [errorMsg, setErrorMsg] = useState(""); // to hold the "Already picked" text
     const colorOptions = ['#a0220c', '#2e8b56', '#1e8fff', '#ffd900', '#8824ec',
         '#2ec4ff', '#ff9500', '#095517', '#ff00f7', '#091490', '#09f34f', '#ff0000'
     ];
     const [tempName, setTempName] = useState(name);
-    const nameRef = useRef(name);
-    const isCleaningUp = useRef(false);
+    const friends = sessionUsers.filter(u => u.id !== socket.id);
+
+    useEffect(() => {
+        const takenColors = friends.map(f => f.color);
+        if (!selectedColor || takenColors.includes(selectedColor)) {
+            const firstAvailable = colorOptions.find(color => !takenColors.includes(color));
+
+            if (firstAvailable) {
+                setSelectedColor(firstAvailable);
+            }
+        }
+    }, [friends]);
     
     const handleJoin = () => {
+        // make sure user has input a name
+        if (!tempName || tempName.trim() === "") {
+            setErrorMsg("Please enter a username!");
+            return;
+        }
+
+        // color selection stuff
+        if (!selectedColor) {
+            setErrorMsg("Please select a color!");
+            return;
+        }
+
         // check if color is taken before joining
-        const isColorTaken = friends.some(f =>
-            f.color?.toLowerCase() === selectedColor?.toLowerCase() &&
-            f.id !== socket.id
-        );
+        const isColorTaken = friends.some(f => f.color === selectedColor);
 
         if (isColorTaken) {
             setErrorMsg("That color is taken, please pick another one!");
             return;
         }
         
+        setErrorMsg("");
         setName(tempName);
         setHasRegistered(true);
+
         // navigate to home screen
         setTimeout(() => {
             navigation.reset({
@@ -43,10 +64,12 @@ export default function ProfileScreen({ navigation }) {
         }, 0);
     };
 
+    const nameRef = useRef(name);
     useEffect(() => {
         nameRef.current = tempName;
     }, [tempName]);
 
+    const isCleaningUp = useRef(false);
     useFocusEffect(
         useCallback(() => {
             return () => {
@@ -95,16 +118,11 @@ export default function ProfileScreen({ navigation }) {
     
             <View style={{ marginVertical: 10, height: 1, backgroundColor: '#eee' }} />
 
-
-                {/* color picker row */}
-                <Text style={[styles.title, {fontSize: 21}]}>Choose your color</Text>
-                <View style={styles.colorContainer}>
-                    {colorOptions.map((color) => {
-                        const heldBySomeoneElse = friends.some(f =>
-                            f.color?.toLowerCase() === color.toLowerCase() &&
-                            f.id !== socket?.id
-                        );
-
+            {/* color picker row */}
+            <Text style={[styles.title, {fontSize: 21}]}>Choose your color</Text>
+            <View style={styles.colorContainer}>
+                {colorOptions.map((color) => {
+                    const heldBySomeoneElse = friends.some(f => f.color === color);
                         return (
                             <TouchableOpacity
                                 key={color}
@@ -112,8 +130,8 @@ export default function ProfileScreen({ navigation }) {
                                 style={[
                                     styles.colorCircle,
                                     { backgroundColor: color }, 
-                                    heldBySomeoneElse && { opacity: 0.3, borderColor: 'black', borderWidth: 3},
-                                    selectedColor === color && { borderWidth: 3, borderColor: 'black' }
+                                    heldBySomeoneElse && { opacity: 0.3, borderColor: '#696969', borderWidth: 3},
+                                    selectedColor === color && { borderWidth: 3, borderColor: '#000000' }
                                 ]}
                                 onPress={() => {
                                     setSelectedColor(color);
@@ -121,19 +139,17 @@ export default function ProfileScreen({ navigation }) {
                                 }} 
                             />
                         );
-                    })}
-                </View>
+                })}
+            </View>
                 
                 {errorMsg ? <Text style={{color: 'red'}}>{errorMsg}</Text> : null}
                 
-                {!hasRegistered ? (
-                <TouchableOpacity style={styles.button} onPress={handleJoin}>
-                    <Text style={styles.buttonText}>Enter Lobby</Text>
-                </TouchableOpacity>
-                ) : ( null
+                {!hasRegistered && (
+                    <TouchableOpacity style={styles.button} onPress={handleJoin}>
+                        <Text style={styles.buttonText}>Enter Lobby</Text>
+                    </TouchableOpacity>
                 )}
 
-            </View>
+        </View>
     );
 }
-

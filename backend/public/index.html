@@ -5,20 +5,24 @@
     <script src="/socket.io/socket.io.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 30px; background-color: #f4f4f9; }
-        .container { max-width: 500px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .container { max-width: 550px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         .status { padding: 10px; margin-bottom: 20px; border-radius: 6px; text-align: center; font-weight: bold; }
         .online { background: #d4edda; color: #155724; }
         .offline { background: #f8d7da; color: #721c24; }
         .card { border-top: 2px solid #eee; padding-top: 15px; margin-top: 15px; }
         input { width: 70%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px; }
-        button { padding: 10px 15px; cursor: pointer; border: none; border-radius: 4px; font-weight: bold; transition: 0.2s; }
+        button { padding: 8px 12px; cursor: pointer; border: none; border-radius: 4px; font-weight: bold; transition: 0.2s; }
         .btn-create { background: #28a745; color: white; }
         .btn-join { background: #007bff; color: white; }
         .btn-leave { background: #dc3545; color: white; width: 100%; margin-top: 10px; }
+        .btn-remove { background: #ff4d4d; color: white; font-size: 11px; margin-right: 5px; }
+        .btn-transfer { background: #ffc107; color: #212529; font-size: 11px; }
         button:hover { opacity: 0.8; }
         ul { list-style: none; padding: 0; }
-        li { padding: 8px; border-bottom: 1px solid #eee; display: flex; align-items: center; }
+        li { padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between; }
+        .user-info { display: flex; align-items: center; }
         .color-dot { width: 12px; height: 12px; border-radius: 50%; margin-right: 10px; }
+        .controls { display: flex; gap: 5px; }
     </style>
 </head>
 <body>
@@ -27,20 +31,23 @@
     <h2>🛠 Room Control Center</h2>
     <div id="status" class="status offline">Connecting...</div>
 
-    <div class="card">
-        <h3>Create Session</h3>
-        <input type="text" id="createIdInput" placeholder="New Room ID (e.g. 9999)">
-        <button class="btn-create" onclick="createSession()">Create</button>
-    </div>
+    <div id="setupArea">
+        <div class="card">
+            <h3>Create Session</h3>
+            <input type="text" id="createIdInput" placeholder="Room ID (e.g. 9999)">
+            <button class="btn-create" onclick="createSession()">Create</button>
+        </div>
 
-    <div id="joinArea" class="card">
-        <h3>Join Session</h3>
-        <input type="text" id="joinIdInput" placeholder="Existing Room ID">
-        <button class="btn-join" onclick="joinSession()">Join</button>
+        <div id="joinArea" class="card">
+            <h3>Join Session</h3>
+            <input type="text" id="joinIdInput" placeholder="Existing Room ID">
+            <button class="btn-join" onclick="joinSession()">Join</button>
+        </div>
     </div>
 
     <div id="roomArea" class="card" style="display:none;">
         <h3>Session: <span id="currentRoomDisplay"></span></h3>
+        <p id="myHostStatus" style="color: #ff9500; font-weight: bold; display: none;">👑 You are the Host</p>
         <p>Active Users:</p>
         <ul id="userList"></ul>
         <button class="btn-leave" onclick="leaveSession()">🚪 Leave Session</button>
@@ -50,39 +57,97 @@
 <script>
     const socket = io();
     let myCurrentRoom = null;
+    let iAmHost = false;
 
-    // --- UI Logic ---
-    const statusDiv = document.getElementById('status');
-    const userListUl = document.getElementById('userList');
-    const roomArea = document.getElementById('roomArea');
-    const joinArea = document.getElementById('joinArea');
+    // --- Listeners ---
 
     socket.on('connect', () => {
-        statusDiv.innerText = "Connected as: " + socket.id;
-        statusDiv.className = "status online";
+        document.getElementById('status').innerText = "Connected as: " + socket.id;
+        document.getElementById('status').className = "status online";
     });
 
-    socket.on('disconnect', () => {
-        statusDiv.innerText = "Disconnected";
-        statusDiv.className = "status offline";
+    socket.on('user-update', (users) => {
+        const userListUl = document.getElementById('userList');
+        userListUl.innerHTML = '';
+
+        users.forEach(user => {
+            const li = document.createElement('li');
+            
+            // User identity section
+            li.innerHTML = `
+                <div class="user-info">
+                    <div class="color-dot" style="background:${user.color}"></div>
+                    <strong>${user.isHost ? '👑 ' : ''}${user.name}</strong> 
+                    ${user.id === socket.id ? ' (You)' : ''}
+                </div>
+            `;
+
+            // Host controls section
+            if (iAmHost && user.id !== socket.id) {
+                const controls = document.createElement('div');
+                controls.className = 'controls';
+
+                // Remove Button
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'btn-remove';
+                removeBtn.innerText = 'Remove';
+                removeBtn.onclick = () => {
+                    if(confirm(`Kick ${user.name}?`)) {
+                        socket.emit('remove-user', { roomID: myCurrentRoom, userIdToRemove: user.id });
+                    }
+                };
+
+                // Transfer Button
+                const transferBtn = document.createElement('button');
+                transferBtn.className = 'btn-transfer';
+                transferBtn.innerText = '👑 Transfer';
+                transferBtn.onclick = () => {
+                    if(confirm(`Transfer host status to ${user.name}?`)) {
+                        socket.emit('transfer-host', { roomID: myCurrentRoom, newHostId: user.id });
+                    }
+                };
+
+                controls.appendChild(removeBtn);
+                controls.appendChild(transferBtn);
+                li.appendChild(controls);
+            }
+
+            userListUl.appendChild(li);
+        });
     });
 
-    // --- 1. Create Session ---
+    socket.on('host-change', (newHostId) => {
+        iAmHost = (socket.id === newHostId);
+        document.getElementById('myHostStatus').style.display = iAmHost ? 'block' : 'none';
+        if (iAmHost) alert("👑 You are now the host!");
+    });
+
+    socket.on('removed-from-session', () => {
+        alert("🚫 You have been removed from the session.");
+        location.reload();
+    });
+
+    socket.on('session-ended', () => {
+        alert("🛑 The host has ended this session.");
+        location.reload();
+    });
+
+    // --- Functions ---
+
     function createSession() {
-        const roomID = document.getElementById('createIdInput').value;
+        const roomID = document.getElementById('createIdInput').value.toUpperCase();
         if (!roomID) return alert("Enter an ID!");
-        
+        iAmHost = true;
         socket.emit('create-session', roomID);
         setupInRoom(roomID);
     }
 
-    // --- 2. Join Session ---
     function joinSession() {
-        const roomID = document.getElementById('joinIdInput').value;
+        const roomID = document.getElementById('joinIdInput').value.toUpperCase();
         if (!roomID) return alert("Enter an ID!");
-
         socket.emit('join-session', roomID, (response) => {
             if (response && response.exists) {
+                iAmHost = false;
                 setupInRoom(roomID);
             } else {
                 alert("Room not found!");
@@ -90,44 +155,28 @@
         });
     }
 
-    // --- 3. Leave Session ---
-    function leaveSession() {
-        if (myCurrentRoom) {
-            socket.emit('leave-session', myCurrentRoom);
-            alert("Left room " + myCurrentRoom);
-            location.reload(); // Simplest way to reset the UI
-        }
-    }
-
     function setupInRoom(roomID) {
         myCurrentRoom = roomID;
         document.getElementById('currentRoomDisplay').innerText = roomID;
-        roomArea.style.display = 'block';
-        joinArea.style.display = 'none';
+        document.getElementById('roomArea').style.display = 'block';
+        document.getElementById('setupArea').style.display = 'none';
+        document.getElementById('myHostStatus').style.display = iAmHost ? 'block' : 'none';
 
-        // Register as a user so the phone sees us
         socket.emit('update-user', { 
             name: "Web Tester", 
             color: "#1e8fff", 
-            sessionId: roomID 
+            sessionId: roomID,
+            isHost: iAmHost 
         });
     }
 
-    // --- Listeners ---
-    socket.on('user-update', (users) => {
-        userListUl.innerHTML = '';
-        users.forEach(user => {
-            const li = document.createElement('li');
-            li.innerHTML = `<div class="color-dot" style="background:${user.color}"></div> 
-                            <strong>${user.name}</strong> ${user.id === socket.id ? '(You)' : ''}`;
-            userListUl.appendChild(li);
-        });
-    });
-
-    socket.on('session-terminated', () => {
-        alert("The session was closed by the server.");
+    function leaveSession() {
+        if (iAmHost) {
+            alert("Please transfer host status or end session before leaving (Host Exit Logic not yet forced in browser).");
+        }
+        socket.emit('leave-session', myCurrentRoom);
         location.reload();
-    });
+    }
 </script>
 </body>
 </html>

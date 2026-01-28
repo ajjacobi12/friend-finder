@@ -17,12 +17,6 @@ export const styles = StyleSheet.create({
         textTransform: 'uppercase', // automatically capitalizes every letter
         letterSpacing: 1 // adds a bit of space between each letter to make uppercase text easier to read
     },
-    statusText: {
-        fontSize: 22, // large text
-        fontWeight: 'bold', // thick font
-        color: '#1c1c1e', // off-black, easier on the eyes than #000000
-        marginBottom: 40 // creates a large 40 unit gap underneath the status
-    },
     statusCard: {
         backgroundColor: '#ffffff', // pure white
         padding: 25, // space inside the box so text isn't touching box edges
@@ -35,7 +29,18 @@ export const styles = StyleSheet.create({
         shadowRadius: 10,
         elevation: 5, // Android shadow
         marginBottom: 20
-        },
+    },
+    cardTitle: {
+        fontSize: 14,
+        color: '#3a3a3c',
+        marginBottom: 8
+    },
+    statusText: {
+        fontSize: 22, // large text
+        fontWeight: 'bold', // thick font
+        color: '#1c1c1e', // off-black, easier on the eyes than #000000
+        marginBottom: 40 // creates a large 40 unit gap underneath the status
+    },
     userCard: {
         backgroundColor: '#ffffff',
         padding: 25,
@@ -48,11 +53,6 @@ export const styles = StyleSheet.create({
         borderRadius: 20,
         width: '60%',
         marginTop: 15
-    },
-    cardTitle: {
-        fontSize: 14,
-        color: '#3a3a3c',
-        marginBottom: 8
     },
     messageText: {
         fontSize: 20,
@@ -82,7 +82,6 @@ export const styles = StyleSheet.create({
     input: {
         fontSize: 20,
         color: 'black',
-
     },
     colorContainer: {
         flexDirection: 'row',        // Lays circles out in a horizontal line

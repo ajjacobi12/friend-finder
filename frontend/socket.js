@@ -16,6 +16,12 @@ const SERVER_URL = "http://192.168.1.8:3000";
 // initializes connection; eg. dialing the phone number but not speaking yet
 const socket = io(SERVER_URL, {
     transports: ['websocket'],
+    reconnection: false, // stops internal library from trying to reconnect automatically, keeps it up to us
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 500, // try to reconnect every 1 second
+    reconnectionDelayMax: 2000, // never wait more than 5 seconds between tries
+    randomizationFactor: 0,
+    timeout: 20000, // 20 seconds before giving up
 }); 
 // by default, socket.io tries HTTP Long Polling first (like sending a bunch of letters),
 // want to force to 'websocket' from start (it's like a live phone call) since it's faster

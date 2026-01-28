@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect } from 'react'; // useState lets app remember things (eg. messages), useEffect allows app to perform actions (eg. connecting ot the server) as soon as it opens
-import { Text, View, StatusBar, TouchableOpacity } from 'react-native'; // components; similar to HTML's tags <div> or <h1>, view = <div>, text for all strings
+import { Text, View, StatusBar, TouchableOpacity, Alert, ScrollView } from 'react-native'; // components; similar to HTML's tags <div> or <h1>, view = <div>, text for all strings
 import { styles } from '../styles';
 import { useUser } from '../UserContext';
-//import { TextInput } from 'react-native-web';
 
 export default function HomeScreen({ navigation }) { 
   // defines the main component of the app "function App()" declares a function named App; "export default" makes this function available to be used by other files
@@ -13,14 +12,59 @@ export default function HomeScreen({ navigation }) {
   // app memory (state) to store the server's message
   // whenever "set" function is called, React Native automatically re-renders (refreshes) the screen to show the new info
   const {
-    name, selectedColor, socket, isConnected, friends, sessionId, secureEmit, handleCleanExit
+    name, selectedColor, socket, isConnected, sessionUsers, sessionId, secureEmit, handleCleanExit, isHost
   } = useUser();
 
+  const friends = sessionUsers.filter(u => u.id !== socket.id);
+
   const onLeave = () => {
-    secureEmit('leave-session', sessionId);
-    handleCleanExit();
+    if (isHost && friends.length > 1) {
+      // if host is leaving but there are 2 or more other users, require transfer of ownership first
+      Alert.alert(
+        "Host transfer required.",
+        "You are the host! Please transfer ownership before leaving the session.",
+        [{ text: "OK", style: "cancel" }]
+      );
+    } else if (isHost && friends.length === 1) { // only one other user, auto-transfer host 
+        secureEmit('transfer-host', { roomID: sessionId, newHostId: friends[0].id }, () => {
+        secureEmit('leave-session', sessionId);
+        handleCleanExit();
+    });
+    } else { // if no one else is in the session or user is not host, just leave
+        secureEmit('leave-session', sessionId);
+        handleCleanExit();
+    }
   };
 
+  const removeUser = (sessionID, friendID) => {
+    Alert.alert(
+      "Remove user?",
+      "Remove user from sessiion?",
+      [{text: "No", 
+        style: "cancel",
+        onPress: () => console.log("Canceled remove user.") },
+        {text: "Yes", 
+        style: "destructive",
+        onPress: () => { secureEmit('remove-user', { roomID: sessionID, userIdToRemove: friendID })}
+       }]
+    );
+  };
+
+  const endSessionForAll = () => {
+    Alert.alert(
+      "End session for all?",
+      "End session for all users?",
+      [{text: "No", 
+        style: "cancel",
+        onPress: () => console.log(`Session ${sessionId} ended for all users.`) },
+        {text: "Yes", 
+        style: "destructive",
+        onPress: () => { secureEmit('end-session', sessionId )}
+       }]
+    );
+  };
+
+  // --- PROFILE AND LEAVE BUTTONS IN HEADER ----
   useLayoutEffect(() => {
     navigation.setOptions({
       headerBackVisible: false,
@@ -28,19 +72,33 @@ export default function HomeScreen({ navigation }) {
         backgroundColor: '#ffffff',
         elevation: 0,
         shadowOpacity: 0,
+        height: 125,
       },
       headerLeft: () => (
         <TouchableOpacity
             activeOpacity={1}
             onPress={() => navigation.navigate('Profile')}  // () => means do this only when button is pressed
-            style={{ marginLeft: 5, paddingHorizontal: 5, backgroundColor: '#ffffff'}}>
-          <Text style={{ color: '#007aff', fontWeight: 'bold',fontSize: 20}}>Profile</Text>
+            style={{ 
+                marginLeft: 15, 
+                paddingHorizontal: 10, 
+                paddingVertical: 10,
+                borderRadius: 20, 
+                backgroundColor: '#007aff' + '25',
+                alignContent: 'center'}}>
+          <Text style={{ color: '#007aff', fontWeight: 'bold',fontSize: 20}}>{"☰ Profile"}</Text>
         </TouchableOpacity>
       ),
       headerRight: () => (
-        <TouchableOpacity onPress={onLeave}  // () => means do this only when button is pressed
-                          style={{ marginLeft: 5, paddingHorizontal: 5, backgroundColor: '#ffffff'}}>
-          <Text style={{ marginLeft: -5, color: '#ff0000', fontWeight: 'bold', fontSize: 20}}>Leave</Text>
+        <TouchableOpacity 
+            activeOpacity={1}
+            onPress={onLeave}  // () => means do this only when button is pressed
+            style={{ 
+                marginRight: 15, 
+                paddingHorizontal: 10,
+                paddingVertical: 10,
+                borderRadius: 20, 
+                backgroundColor: '#ff0000' + '25' }}>
+          <Text style={{ color: '#ff0000', fontWeight: 'bold', fontSize: 20}}>{"👋 Leave"}</Text>
         </TouchableOpacity>
       ),
     });
@@ -53,8 +111,8 @@ export default function HomeScreen({ navigation }) {
   
   // initial join - tell server who we are
   useEffect(() => {
-    secureEmit('update-user', { name, color: selectedColor, sessionId });
-  }, [name, selectedColor, sessionId]);
+    secureEmit('update-user', { name, color: selectedColor, sessionId, isHost });
+  }, [name, selectedColor, sessionId, isHost]);
 
  // ----- MAIN UI ------
  return (
@@ -62,62 +120,124 @@ export default function HomeScreen({ navigation }) {
     <View style={styles.container}>
         <StatusBar barStyle="dark-content" />
        
-        {/* --- connection status ----- */}
-        <Text style={styles.label}>Status:</Text>
+        {/* --- CONNECTION STATUS ----- */}
+        {/* <Text style={styles.label}>Status:</Text>
         <Text style={[styles.statusText, {color: isConnected ? 'green' : 'red' }]}>
             {isConnected ? "Connected!" : "Offline"}
-        </Text>
+        </Text> */}
 
-        <View style={[styles.statusCard, {width: '40%', backgroundColor: 'white', alignItems: 'center', marginTop: -20, padding: 10}]}> 
-            <Text style={[styles.label, {color: '#242625', fontSize: 15}]}>Session ID</Text>
-            <Text style={{ fontSize: 24, fontWeight: 'bold', color: 'black', marginTop: 10 }}>
-                {sessionId || "None"}
-            </Text>
-        </View>
-
-        {/* --- Username and color: current status ---- */}
-        <View style={[styles.statusCard, {backgroundColor: 'white' }]}>
-            <Text style ={[styles.messageText, { color: '#282525' }]}>
-                Username: <Text style={{color: selectedColor, fontWeight: 'bold'}}>{name || 'Anonymous'}</Text>
-            </Text>
-        </View>
-
-        {/* -- ID section -- */}
-        <View style={styles.userCard}>
-
-            {/* my ID */}
-            <Text style={styles.cardTitle}>Your ID:</Text>
-            <View style={[styles.friendBadge, { borderColor: selectedColor, backgroundColor: selectedColor + '25' }]}>
-                <Text style={styles.friendIdText}>
-                    ⭐ You: {name || "Loading..."}
-                </Text>
-                <Text style={{ fontSize: 11, color: 'grey', marginTop: 2 }}>
-                    ID: {socket.id}
+        {/* --- SESSION ID (& HOST ONLY: END SESSION FOR ALL) ---- */}
+        <View style={{ 
+            flexDirection: 'row', 
+            justifyContent: isHost ? 'space-between' : 'center', 
+            alignItems: 'center', 
+            width: '100%',
+            paddingHorizontal: 20}}>
+            <View style={[styles.statusCard, {width: '40%', backgroundColor: 'white', alignItems: 'center', padding: 10, marginTop: 10}]}> 
+                <Text style={[styles.label, {color: '#242625', fontSize: 15}]}>Session ID</Text>
+                <Text style={{ fontSize: 24, fontWeight: 'bold', color: 'black', marginTop: 10 }}>
+                    {sessionId || "None"}
                 </Text>
             </View>
-
-            <View style={{ marginVertical: 10, height: 1, backgroundColor: '#eee' }} />
-
-            {/* online friend list */}
-            <Text style={styles.cardTitle}>People Nearby:</Text>
-            {friends.length <= 1 ? ( // 1 because "you" are always in the list
-                <Text style={styles.IDText}>No one else is here yet...</Text>
-            ) : (
-                friends
-                    .filter(u => u.id !== socket.id) // first remove me from list
-                    .map((friend) => (
-                    // only show friend if it isn't me
-                        <View key={friend.id} 
-                            style={[styles.friendBadge, { borderColor: friend.color || '#ccc', borderWidth: 2 }]}>
-                            <Text style={styles.friendIdText}>
-                                👤 {friend.name} 
-                            </Text>
-                        </View>   
-                ))
+            {isHost && (
+                <TouchableOpacity 
+                    activeOpacity={1}
+                    onPress={endSessionForAll}  // () => means do this only when button is pressed
+                    style={{ 
+                        paddingHorizontal: 10,
+                        paddingVertical: 10,
+                        borderRadius: 20, 
+                        backgroundColor: '#ff0000' + '25',
+                        marginBottom: 10
+                    }}>
+                    <Text style={{ color: '#000000', fontSize: 20, textAlign: 'center', fontWeight: 'bold' }}>
+                        {"End Session\nFor All"}
+                    </Text>
+                </TouchableOpacity>            
             )}
         </View>
+    
+        {/* --- USER LIST ----- */}
+        <View style={[styles.userCard, {paddingVertical: 10}]}>
+            {/* --- MY USERNAME AND COLOR ---- */}
+            <View style={[styles.friendBadge, 
+                { 
+                    borderColor: selectedColor, 
+                    backgroundColor: selectedColor + '25', 
+                    borderWidth: 3, 
+                    marginBottom: 2,
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                }]}>
+                <Text style={[styles.friendIdText, { fontSize: 20, fontWeight: 'bold' }]}>
+                    {isHost ? '👑 ' : '⭐ '} { name || "Loading..."}
+                </Text>
+            </View>
+                
+            {/* --- DIVIDER ---- */}
+            <Text style={{ fontSize: 14, color: 'grey', marginTop: 8, marginLeft: 5, marginBottom: 5 }}>
+                PEOPLE NEARBY ({friends.length})
+            </Text>
 
-        {/* -- navigation section -- */}
+            {/* ---- SCROLLABLE FRIENDS LIST ----- */}        
+            <View style={{ 
+                backgroundColor: 'white', 
+                padding: 0, 
+                flexGrow: 0, 
+                maxHeight: 250 
+            }}>
+                <ScrollView 
+                    showsVerticalScrollIndicator={true}
+                    contentContainerStyle={{ paddingBottom: 20 }}
+                >
+                    {sessionUsers.length <= 1 ? ( // 1 because "you" are always in the list
+                        <Text style={styles.IDText}>No one else is here yet...</Text>
+                    ) : (
+                        friends.map((friend) => (
+                            <View key={friend.id} 
+                                style={[styles.friendBadge, { 
+                                    borderColor: friend.color || '#ccc', 
+                                    borderWidth: 2,
+                                    flexDirection: 'row', 
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    // marginBottom: 10
+                                }]}>
+                                <Text style={[styles.friendIdText, { fontSize: 17 }]}>
+                                    {friend.isHost ? '👑 ' : '👤 '} {friend.name} 
+                                </Text>
+
+                                {/* HOST TOOLS */}
+                                {isHost && (
+                                    <View style={{ 
+                                        flexDirection: 'row', 
+                                        alignItems: 'center', 
+                                        justifyContent: 'flex-end' 
+                                    }}>
+                                        <TouchableOpacity
+                                            onPress={() => secureEmit('transfer-host', { roomID: sessionId, newHostId: friend.id })}
+                                            style={{ marginLeft: 30 }}>
+                                            <Text style={{ fontSize: 20 }}>👑 </Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            onPress={() => removeUser(sessionId, friend.id)}
+                                            style={{ marginLeft: 10 }}>
+                                            <Text style={{ color: 'red', fontWeight: 'bold', fontSize: 17 }}>Remove</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+                            </View>   
+                        ))
+                    )}
+                </ScrollView>
+            </View>
+        </View>
+
+
+
+
+        {/* -- NAVIGATION SECTION -- */}
         <View style={{ marginTop: 'auto', marginBottom: 20, width: '100%'}}>
 
             {/* map */}

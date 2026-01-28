@@ -1,7 +1,8 @@
 // app's long-term memory and its connection to the outside world (the socket)
 
 // ---- IMPORTS -----
-import React, { useState, createContext, useContext, useEffect, useCallback } from 'react';
+import React, { useState, createContext, useContext, useEffect, useCallback, useRef } from 'react';
+import { Alert } from 'react-native';
 import socket from './socket';
 import { Audio } from 'expo-av';
 import { navigationRef } from './navigationService';
@@ -18,14 +19,16 @@ export const UserProvider = ({ children }) => {
     const [hasRegistered, setHasRegistered] = useState(false);
     const [isConnected, setIsConnected] = useState(socket.connected);
     const [sessionId, setSessionId] = useState(null);
-    const [friends, setFriends] = useState([]);
+    const [sessionUsers, setSessionUsers] = useState([]);
+    const [isHost, setIsHost] = useState(false);
 
     // --- CLEANUP FUNCTION ----
     const handleCleanExit = useCallback(() => {
         setHasRegistered(false);
         setSessionId(null);
-        setFriends([]);
-        setSelectedColor("#cccccc");
+        setSessionUsers([]);
+        setSelectedColor("#a0220c");
+        setIsHost(false);
 
         if (navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== 'Login') {
             navigationRef.reset({
@@ -55,9 +58,35 @@ export const UserProvider = ({ children }) => {
     };
 
 
-    // Handle global user updates & connection
+    // ----- Handle global user updates & connection -----
+
+    // keep a ref to the latest sessionId for cleanup on disconnect
+    const sessionIdRef = useRef(sessionId);
     useEffect(() => {
-        if (!socket) return;
+        sessionIdRef.current = sessionId;
+    }, [sessionId]);
+
+    // manually poke socket every 5 seconds if it's taking too long to realize the server is back
+    const isConnectingRef = useRef(false);
+    useEffect(() => {
+        const interval = setInterval(() => {
+            if (!socket.connected && !isConnectingRef.current) {
+                console.log("Socket disconnected, attempting to reconnect...");
+                isConnectingRef.current = true;
+                socket.disconnect().connect();
+            }            
+        }, 5000); // every 5 seconds
+
+        return () => clearInterval(interval);
+    }, []);
+
+    // if socket changes (app starts up): 
+    // if connecting set connection status to true
+    // if disconnecting/connection drops then start cleanup
+    // if user-update is sent then play sound and update user list
+    const listenersAttached = useRef(false);
+    useEffect(() => {
+        if (!socket || listenersAttached.current) return;
 
         // sound stuff
         const playJoinSound = async () => {
@@ -74,42 +103,73 @@ export const UserProvider = ({ children }) => {
         };
 
         setIsConnected(socket.connected);
-        
-        socket.on('connect', () => setIsConnected(true));
+                    
+        socket.on('connect', () => {
+            console.log("Connected to server with ID:", socket.id);
+            setIsConnected(true);
+            isConnectingRef.current = false; // reset the flag upon successful connection
+        });
 
         socket.on('disconnect', (reason) => {
             setIsConnected(false);
+            isConnectingRef.current = false;
             console.log("Disconnected from server:", reason);
+            if (sessionIdRef.current) handleCleanExit();
+        });
 
-            if (sessionId) {
-                handleCleanExit();
+        socket.on('user-update', (sessionUsers) => {
+            // logic for sound
+            setSessionUsers((prev) => {
+                if (sessionUsers.length > prev.length && prev.length !== 0) {
+                    playJoinSound();
+                }
+                return sessionUsers;
+            });
+        });
+
+        socket.on('session-ended', () => {
+            if (!isHost)    {
+                Alert.alert("The host has ended the session.");
+            }
+            handleCleanExit();
+        });
+
+        socket.on('removed-from-session', () => {
+            Alert.alert("You have been removed from the session by the host.");
+            handleCleanExit();
+        });
+
+        socket.on('host-change', (newHostId) => {
+            if (socket.id === newHostId) {
+                Alert.alert("You are now the host of this session.");
+                setIsHost(true);
+            } else {
+                setIsHost(false);
             }
         });
 
-        socket.on('user-update', (userList) => {
-            // logic for sound
-            setFriends((prev) => {
-                if (userList.length > prev.length && prev.length !== 0) {
-                    playJoinSound();
-                }
-                return userList;
-            });
-
-        });
+        listenersAttached.current = true;
         
         // cleanup -- stop listening if app closes
         return () => {
+            console.log("App refreshing or unmounting. Disconnecting socket...");
             socket.off('connect');
             socket.off('disconnect');
             socket.off('user-update');
+            socket.off('session-ended');
+            socket.off('removed-from-session');
+            socket.off('host-change');
+
+            isConnectingRef.current = false;
+            listenersAttached.current = false;
         };
-    }, [sessionId, socket, handleCleanExit]); // re-run listener if sessionId changes to ensure correct filtering
+    }, [handleCleanExit]); // re-run listener if sessionId changes to ensure correct filtering
 
     return (
         <UserContext.Provider value={{
             name, setName, selectedColor, setSelectedColor, hasRegistered, 
-            setHasRegistered, socket, isConnected, sessionId, setSessionId, friends, setFriends, secureEmit,
-            handleCleanExit
+            setHasRegistered, socket, isConnected, sessionId, setSessionId, sessionUsers, setSessionUsers, secureEmit,
+            handleCleanExit, isHost, setIsHost
         }}>
             {children}
         </UserContext.Provider>

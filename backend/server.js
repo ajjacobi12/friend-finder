@@ -1,21 +1,24 @@
 // 1. import the "engines"
 const express = require('express'); // pulls blueprints for express framework
+const { isBigIntObject } = require('util/types');
 const app = express(); // creates an instance of Express app, handles web routes and logic
 const http = require('http').createServer(app); // the "wrapping", takes built-in Node "http" module and creates physical server, passes app into it so the server knows to use Express to handle incoming web requests
 const io = require('socket.io')(http, {
     cors: {
         origin: "*", // this allows phone to talk to computer
         methods: ["GET", "POST"]
-    }
+    },
+    pingTimeout: 2000, // wait 2 seconds before declaring "dead"
+    pingInterval: 5000 // send a ping every 5 seconds
 }); // imports socket.io (tool for real-time, two-way communication), and attaches it to "http" server
 
 // 2. set up the "static folder"
 app.use(express.static('public')); // tells Express, "if anyoneasks for a file (eg. image, CSS file, or html page), look inside a folder named public". This is howto "serve" the frontend code to the user's browser
 
-// object to store users { "socketID", name: ...,  color: ...}
+// object to store users { "socketID", name: ...,  color: ..., isHost: ...}
 let activeUsers = {};
 
-// tracks active room IDs and number of users in room
+// tracks active room IDs
 let activeSessions = {};
 
 // tracking "deletion tickets" to stop countdown before server deletion
@@ -37,18 +40,28 @@ const broadcastUpdate = (roomID, logMessage) => {
 const handleUserJoiningRoom = (socket, roomID) => {
     // Stop the deletion timer if it's running
     cancelRoomDeletion(roomID);
-
     socket.join(roomID);
     activeSessions[roomID] = true;
+
+    const hasHost = Object.values(activeUsers).some(u => u.sessionId === roomID && u.isHost);
+
     if (!activeUsers[socket.id]) {
         activeUsers[socket.id] = { 
             id: socket.id,
             name: "New User",
             color: "#cccccc",
-            sessionId: roomID
+            sessionId: roomID,
+            isHost: !hasHost
          };
     } else {
-    activeUsers[socket.id].sessionId = roomID;
+        activeUsers[socket.id].sessionId = roomID;
+        if (!hasHost) {
+            activeUsers[socket.id].isHost = true;
+        }
+    }
+    if (activeUsers[socket.id].isHost) {
+        console.log(`User ${socket.id} is assigned as host for room ${roomID}`);
+        io.to(roomID).emit('host-change', socket.id);
     }
 };
 
@@ -87,16 +100,32 @@ const cancelRoomDeletion = (roomID) => {
     }
 };
 
+// helper to ensure room always has a host (host leaves without selecting new host)
+const ensureHostExists = (roomID, leavingSocketId) => {
+    const remainingUsers = Object.values(activeUsers).filter(u => u.sessionId === roomID && u.id !== leavingSocketId);
+    if (remainingUsers.length > 0) {
+        const newHost = remainingUsers[0];
+        newHost.isHost = true;
+        console.log(`New host for room ${roomID} is ${newHost.id}`);
+        io.to(roomID).emit('host-change', newHost.id);
+    };
+};
 
 // 3. handle live connections
 io.on('connection', (socket) => { // an event listener -- waits for user to open the app, and when opened, it triggers a function that gives that specific user a unique "socket" object (their personal "phone line" to the server)
     // io.on('..', (ALWAYS gives socket/ID number))
     // socket.on('..', (ALWAYS gives data, eg. message))
+    console.log(`New user connected: ${socket.id}`);
  
     // ---- CREATE SESSION -----
-    socket.on('create-session', (roomID) => {
+    socket.on('create-session', (roomID, callback) => {
         handleUserJoiningRoom(socket, roomID);
+        if (activeUsers[socket.id]) activeUsers[socket.id].isHost = true;
         console.log(`Session Created: ${roomID}`);
+
+        if (typeof callback == 'function') {
+            callback();
+        }
     });
 
     // ---- JOIN A SESSION ----
@@ -106,11 +135,11 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
         if (activeSessions[roomID] != undefined) {  // checks to see if roomID actually exists/is active            
             handleUserJoiningRoom(socket, roomID);
 
-            const usersInRoom = Object.values(activeUsers).filter(u => u.sessionId === roomID);
+            const currentUsers = Object.values(activeUsers).filter(u => u.sessionId === roomID);
             broadcastUpdate(roomID, `User ${socket.id} joined room ${roomID}`);
 
             if(typeof callback == 'function') {
-                callback({ exists: true, currentUsers: usersInRoom });
+                callback({ exists: true, currentUsers });
             }
         } else {
             console.log(`Failed: Room ${roomID} does not exist.`);
@@ -124,34 +153,43 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
     socket.on('update-user', (profile) => {
         // save/update user data
         // profile = { name: ..., color: ...}
-        activeUsers[socket.id] = { ...profile, id: socket.id };
+        const currentlyIsHost = activeUsers[socket.id]?.isHost || false;
+        activeUsers[socket.id] = { ...profile, id: socket.id, isHost: currentlyIsHost };
         // broadcast refreshed list to everyone in that session
-        broadcastUpdate(profile.sessionId, `User ${profile.sessionId} (${profile.name}) updated their profile.`);
+        broadcastUpdate(profile.sessionId, `User ${socket.id} (${profile.name}) updated their profile.`);
     });
 
-    // --- CASE 1: leave session (exit room)
-        socket.on('leave-session', (roomID) => {
-            if (!activeUsers[socket.id]) return; // if user is gone, do nothing
+    // --- CASE 1: user voluntarily leaves session (exit room)
+    socket.on('leave-session', (roomID) => {
+        if (!activeUsers[socket.id]) return; // if user is gone, do nothing
 
-            const userName = activeUsers[socket.id].name || socket.id;
+        const userName = activeUsers[socket.id].name || socket.id;
 
-            delete activeUsers[socket.id];  // free the data
-            
-            broadcastUpdate(roomID, `User ${socket.id} (${userName}) left room ${roomID}`);
-            socket.leave(roomID);  // stop hearing room updates
+        if (activeUsers[socket.id].isHost === true) {
+            ensureHostExists(roomID, socket.id);
+        }
 
-            setTimeout(() => {
-                handleRoomCleanup(roomID); // drop count and start time
-            }, 50);         
-        });
+        delete activeUsers[socket.id];  // free the data
+        
+        broadcastUpdate(roomID, `User ${socket.id} (${userName}) left room ${roomID}`);
+        socket.leave(roomID);  // stop hearing room updates
+
+        setTimeout(() => {
+            handleRoomCleanup(roomID); // drop count and start time
+        }, 50);         
+    });
 
     // ---- CASE 2: DISCONNECT (eg. unexpected exits, closing the app) ----------
     socket.on('disconnect', () => { 
         const user = activeUsers[socket.id];
+        console.log(`User disconnected: ${socket.id}`);
+
         if (user) {
             const roomID = user.sessionId;
             const userName = user.name || socket.id;
-
+            if (user.isHost === true) {
+                ensureHostExists(roomID, socket.id);
+            }
             delete activeUsers[socket.id];
 
             setTimeout(() => {
@@ -160,6 +198,70 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
             }, 50);
         }
     });
+
+    // --- CASE 3: Host ends session for everyone ----
+    socket.on('end-session', (roomID) => {
+        console.log(`Host is ending session: ${roomID}`);
+        io.to(roomID).emit('session-ended');
+
+        // clean up memory for everyone who was in that room
+        Object.keys(activeUsers).forEach(id => {
+            if (activeUsers[id].sessionId === roomID) {
+                delete activeUsers[id];
+            }
+        });
+
+        // remove room from active sessions
+        delete activeSessions[roomID];
+        if (roomTimeoutRefs[roomID]) {
+            clearTimeout(roomTimeoutRefs[roomID]);
+            delete roomTimeoutRefs[roomID];
+        }
+
+        // force everyone out of socket room
+        const room = io.sockets.adapter.rooms.get(roomID);
+        if (room) {
+            for (const socketId of room) {
+                const s = io.sockets.sockets.get(socketId)
+                if (s) s.leave(roomID);
+            }
+        }
+
+        console.log(`Session ${roomID} has been ended by the host.`);
+    });
+
+    // --- CASE 4: host removes a specific user ---
+    socket.on('remove-user', ( {roomID, userIdToRemove} ) => {
+        const targetSocket = io.sockets.sockets.get(userIdToRemove);
+
+        // force specific spocket to leave room
+        if (targetSocket) {
+            targetSocket.emit('removed-from-session'); // tell victim's app they're being removed
+            targetSocket.leave(roomID); // force them to leave
+            const userName = activeUsers[userIdToRemove]?.name || "User";
+            delete activeUsers[userIdToRemove]; // clean up their data
+            broadcastUpdate(roomID, `User (${userName}) was removed by the host.`);
+        }
+        handleRoomCleanup(roomID);
+    });
+
+    // --- TRANSFER HOST STATUS ----
+    socket.on('transfer-host', ( {roomID, newHostId} ) => {
+        console.log(`Transferring host status in room ${roomID} to ${newHostId}`);
+        // strip host status from everyone (prevents two hosts)
+        const usersInRoom = Object.values(activeUsers).filter(u => u.sessionId === roomID);
+        usersInRoom.forEach(u => {
+            if (u.isHost) u.isHost = false;
+        });
+
+        // assign new host
+        if (activeUsers[newHostId]) {
+            activeUsers[newHostId].isHost = true;
+            io.to(roomID).emit('host-change', newHostId);
+            broadcastUpdate(roomID, `${newHostId} is now the host.`);
+        }
+    });
+
 });
 
 // 4. start the server

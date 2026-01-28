@@ -6,7 +6,8 @@
 import React from 'react';
 import { TouchableOpacity, Text } from 'react-native';
 import { DefaultTheme, NavigationContainer, createNavigationContainerRef } from '@react-navigation/native'; // manages app state and links app to phone's back button
-import { createNativeStackNavigator } from '@react-navigation/native-stack'; // creates a mechanism where screens behave like a deck of cards
+//import { createNativeStackNavigator } from '@react-navigation/native-stack'; // creates a mechanism where screens behave like a deck of cards
+import { createStackNavigator, CardStyleInterpolators } from '@react-navigation/stack';
 import { UserProvider } from './UserContext' // "global memory", wrapping everything in this, every screen can access the same data without having to pass it manually every time
 import { navigationRef } from './navigationService';
 
@@ -15,11 +16,11 @@ import ProfileScreen from './screens/ProfileScreen'
 import HomeScreen from './screens/HomeScreen';
 import ChatScreen from './screens/ChatScreen';
 import MapScreen from './screens/MapScreen';
-import InitialScreen from './screens/LoginScreen'
+import LoginScreen from './screens/LoginScreen'
 
 // initializing the Stack tool to allow screens to slide on top of each other
 // two components: stack.navigator (the manager) and stack.screen (the individual pages)
-const Stack = createNativeStackNavigator();
+const Stack = createStackNavigator();
 
 const myTheme = {
   ...DefaultTheme,
@@ -41,8 +42,16 @@ export default function App() {
             <Stack.Navigator 
               initialRouteName="Login"
               screenOptions={{
-                headerStyle: { backgroundColor: '#ffffff' },
-                contentStyle: { backgroundColor: '#ffffff' },
+                headerStyle: { 
+                  backgroundColor: '#ffffff',
+                  elevation: 0,
+                  shadowOpacity: 0,
+                  borderBottomWidth: 0,
+                },
+                cardStyle: { backgroundColor: '#ffffff' },
+                headerMode: 'screen',
+                headerShadowVisible: false,
+                cardStyleInterpolator: CardStyleInterpolators.forFadeFromBottomAndroid,
               }}>
 
                 {/* initialRouteName dictates which screen first pops up upon opening app */}
@@ -52,7 +61,7 @@ export default function App() {
                 {/* initial screen */}
                 <Stack.Screen
                 name="Login" 
-                component={InitialScreen} 
+                component={LoginScreen} 
                 options={{ title: 'Login' }} 
                 />  
                 {/* ID of the screen */}
@@ -63,7 +72,14 @@ export default function App() {
                 <Stack.Screen
                 name="Profile"
                 component={ProfileScreen}
-                options={{ title: 'Profile Setup' }}
+                options={{ 
+                  title: 'Profile Setup',
+                  headerTitleStyle: { 
+                    fontSize: 27, 
+                    fontWeight: 'bold',
+                    fontFamily: 'Courier',
+                    color: '#2f2f4d'
+                  } }}
                 />    
 
                 {/* map screen */}
@@ -77,14 +93,30 @@ export default function App() {
                 <Stack.Screen
                 name="Chat"
                 component={ChatScreen}
-                options={{ title: 'Messages' }}
+                options={{ 
+                  title: 'Chat',
+                  headerTitleStyle: { 
+                    fontSize: 40, 
+                    fontWeight: 'bold',
+                    fontFamily: 'Courier',
+                    color: '#2f2f4d'
+                  }
+                 }}
                 />           
 
                 {/* home screen */}
                 <Stack.Screen
                 name="Home"
                 component={HomeScreen}
-                options={{ title: 'Lobby' }}
+                options={{ 
+                  title: 'Lobby',
+                  headerTitleStyle: { 
+                    fontSize: 40, 
+                    fontWeight: 'bold',
+                    fontFamily: 'Courier',
+                    color: '#2f2f4d'
+                  }
+                 }}
                 />
 
             </Stack.Navigator>
