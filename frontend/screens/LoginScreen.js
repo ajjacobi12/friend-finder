@@ -49,7 +49,7 @@ export default function LoginScreen( { navigation }) {
                 setLoading(false);
                 console.log("Server response for joining session:", response);
 
-                if (response && response.exists) {           
+                if (response && response.exists && !response.full) {           
                     setErrorMsg("");         
                     if (response.currentUsers) {
                         setSessionUsers(response.currentUsers);
@@ -58,7 +58,11 @@ export default function LoginScreen( { navigation }) {
                     setIsHost(false);
                     console.log("Navigating to profile...");
                     navigation.navigate('Profile');
-                } else {
+                } else if (response && response.exists && response.full) {
+                    setErrorMsg("Session is full!");
+                    setTimeout(() => {setErrorMsg("")}, 5000);
+                }       
+                else if (response && !response.exists){
                     setErrorMsg("Session not found. Check the code!");
                     setTimeout(() => {setErrorMsg("")}, 5000);
                 }

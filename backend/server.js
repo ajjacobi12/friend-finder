@@ -59,6 +59,9 @@ const handleUserJoiningRoom = (socket, roomID) => {
             activeUsers[socket.id].isHost = true;
         }
     }
+    const userName = activeUsers[socket.id].name || socket.id;
+    broadcastUpdate(roomID, `User ${socket.id} (${userName}) joined room ${roomID}`);
+
     if (activeUsers[socket.id].isHost) {
         console.log(`User ${socket.id} is assigned as host for room ${roomID}`);
         io.to(roomID).emit('host-change', socket.id);
@@ -132,14 +135,20 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
     socket.on('join-session', (roomID, callback) => {
         console.log(`Request to join room: ${roomID} from ${socket.id}`);
 
-        if (activeSessions[roomID] != undefined) {  // checks to see if roomID actually exists/is active            
-            handleUserJoiningRoom(socket, roomID);
+        if (activeSessions[roomID] != undefined) {  // checks to see if roomID actually exists/is active  
+            const usersAlreadyInRoom = Object.values(activeUsers).filter(u => u.sessionId === roomID);          
+            if(usersAlreadyInRoom.length >= 12) {
+                console.log(`Failed: Room ${roomID} is full.`);
+                if(typeof callback == 'function') {
+                    callback({ exists: true, full: true });
+                }
+            } else {
+                handleUserJoiningRoom(socket, roomID);
 
-            const currentUsers = Object.values(activeUsers).filter(u => u.sessionId === roomID);
-            broadcastUpdate(roomID, `User ${socket.id} joined room ${roomID}`);
-
-            if(typeof callback == 'function') {
-                callback({ exists: true, currentUsers });
+                const currentUsers = Object.values(activeUsers).filter(u => u.sessionId === roomID);
+                if(typeof callback == 'function') {
+                    callback({ exists: true, full: false, currentUsers });
+                }
             }
         } else {
             console.log(`Failed: Room ${roomID} does not exist.`);
@@ -262,10 +271,84 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
         }
     });
 
+    // --- MESSAGING ----
+
+    socket.on('send-message', (messageData) => {
+        const { roomID, context } = messageData;
+        const text = context?.text;
+        const user = activeUsers[socket.id];
+
+        // validate the message, don't process empty data
+        if (!user || !roomID || !text || text.trim().length === 0) return;
+
+        // sanitization: prevent basic XSS (if not encrypted yet)
+        // if sending raw text, escape html tags
+        const sanitizedText = text.replace(/<[^>]*>?/gm, '');
+
+
+        // room security check (contains an _ based on join logic)
+        if (roomID.includes('_')) {
+            // logic for DMs
+            const recipientID = roomID.split('_').find(id => id !== socket.id);
+            const recipientSocket = io.sockets.sockets.get(recipientID);
+            if (recipientSocket) {
+                recipientSocket.join(roomID);
+
+                // notify user that they have received a DM
+                recipientSocket.emit('new-dm-notification', {
+                    fromName: user.name,
+                    fromID: socket.id,
+                    roomID: roomID,
+                    text: sanitizedText
+                });
+            }
+        } else {
+            const joinedRooms = Array.from(socket.rooms);
+            if (!joinedRooms.includes(roomID)) {
+                console.log(`Security Alert: User ${socket.id} attempted to send message to room ${roomID} without joining it.`);
+                return;
+            }
+        }
+
+        // reconstruct package, don't just send 'messagData', only emit what's necessary
+        const outboundData = {
+            ...messageData,
+            sender: user.name,
+            color: user.color,
+            context: {
+                ...messageData.context,
+                text: sanitizedText
+            },
+            serverTimestamp: new Date().toISOString()
+        };
+
+        // broadcast to everyone in room except sender
+        socket.to(roomID).emit('receive-message', outboundData);
+        console.log(`[CHAT] Room ${roomID} | ${user.name}: ${sanitizedText}`);
+    });
+
+    socket.on('join-dm', ( {dmRoomID, targetName} ) => {
+        socket.join(dmRoomID);
+        console.log(`User ${socket.id} is joining DM room: ${dmRoomID} with ${targetName}`);
+    });
+
+    socket.on('typing', (data) => {
+        socket.to(data.roomID).emit('user-typing', {
+            name: data.name,
+            id:socket.id
+        }); 
+    });
+
+    socket.on('stop-typing', (data) => {
+        socket.to(data.roomID).emit('user-stop-typing', {
+            id: socket.id
+        });
+    });
+
 });
 
 // 4. start the server
 const PORT = 3000; // think of as "door number" of server
 http.listen(PORT, '0.0.0.0', () => { // tells http server (the one wrapping everything) to start listneing for traffic on door 3000
-    console.log(`Server is running on all interfaces at http://127.0.0.1:${PORT}`); // message to let you know server started successfully without any errors
+    console.log(`Server is running on all interfaces at port ${PORT}`); // message to let you know server started successfully without any errors
 });

@@ -2,7 +2,7 @@
 
 // ---- IMPORTS -----
 import React, { useState, createContext, useContext, useEffect, useCallback, useRef } from 'react';
-import { Alert } from 'react-native';
+import { Alert, TouchableOpacity, View, Text, Animated, StyleSheet, PanResponder } from 'react-native';
 import socket from './socket';
 import { Audio } from 'expo-av';
 import { navigationRef } from './navigationService';
@@ -21,6 +21,66 @@ export const UserProvider = ({ children }) => {
     const [sessionId, setSessionId] = useState(null);
     const [sessionUsers, setSessionUsers] = useState([]);
     const [isHost, setIsHost] = useState(false);
+    const [notification, setNotification] = useState(null);
+    const [allMessages, setAllMessages] = useState({});
+
+    
+    const slideAnim = useRef(new Animated.Value(-100)).current;
+    const hideTimeout = useRef(null);
+
+    // --- SHOW NOTIFICATION FUNCTION ---
+    const showNotification = useCallback((data) => {
+        // clear any existing timer
+        if (hideTimeout.current) clearTimeout(hideTimeout.current);
+
+        setNotification(data);
+
+        // slide down animation
+        Animated.spring(slideAnim, {
+            toValue: 65,
+            useNativeDriver: true,
+            tension: 50,
+            friction: 8
+        }).start();
+
+        // auto-hide after 5 seconds
+        hideTimeout.current = setTimeout(() => {
+            Animated.timing(slideAnim, {
+                toValue: -100,
+                duration: 300,
+                useNativeDriver: true,
+            }).start(() => setNotification(null));
+        }, 5000);   
+    }, [slideAnim]);
+
+    // ---  GET RID OF NOTIFICATION ---
+    const hideNotification = useRef(
+        PanResponder.create({
+            onStartShouldSetPanResponder: () => true,
+            onMoveShouldSetPanResponder: (evt, gestureState) => Math.abs(gestureState.dy) > 5,
+            onPanResponderMove: (event, gestureState) => {
+                if (gestureState.dy < 0) { // if swiped up
+                    slideAnim.setValue(65 + gestureState.dy);
+                }
+            },
+            onPanResponderRelease: (event, gestureState) => {
+                if (gestureState.dy < -20) { // if swiped up enough
+                    if (hideTimeout.current) clearTimeout(hideTimeout.current);
+                    Animated.timing(slideAnim, {
+                        toValue: -100,
+                        duration: 200,
+                        useNativeDriver: true,
+                    }).start(() => setNotification(null));
+                } else {
+                    // snap back down
+                    Animated.spring(slideAnim, {
+                        toValue: 65,
+                        useNativeDriver: true,
+                    }).start();
+                }
+            },
+        })
+    ).current;
 
     // --- CLEANUP FUNCTION ----
     const handleCleanExit = useCallback(() => {
@@ -57,6 +117,20 @@ export const UserProvider = ({ children }) => {
         }
     };
 
+    // save messages in chat
+    useEffect(() => {
+        if (!socket) return;
+        socket.on('receive-message', (data) => {
+            setAllMessages((prevMessages) => ({
+                ...prevMessages,
+                [data.roomID]: [...(prevMessages[data.roomID] || []), data]
+            }));
+        });
+
+        return () => {
+            socket.off('receive-message');
+        };
+    }, [socket]);     
 
     // ----- Handle global user updates & connection -----
 
@@ -85,6 +159,7 @@ export const UserProvider = ({ children }) => {
     // if disconnecting/connection drops then start cleanup
     // if user-update is sent then play sound and update user list
     const listenersAttached = useRef(false);
+    const isInitialHostAssignment = useRef(true);
     useEffect(() => {
         if (!socket || listenersAttached.current) return;
 
@@ -141,11 +216,26 @@ export const UserProvider = ({ children }) => {
 
         socket.on('host-change', (newHostId) => {
             if (socket.id === newHostId) {
-                Alert.alert("You are now the host of this session.");
+                if (!isInitialHostAssignment.current) {
+                    Alert.alert("You are now the host of this session.");
+                }
                 setIsHost(true);
             } else {
                 setIsHost(false);
             }
+            isInitialHostAssignment.current = false;
+        });
+
+        socket.on('new-dm-notification', (data) => {
+            // if already in room, no alert
+            if (navigationRef.getCurrentRoute()?.params?.dmRoomID === data.roomID) return;
+
+            showNotification({
+                title: data.fromName,
+                message: data.text,
+                roomID: data.roomID,
+                fromID: data.fromID,
+            });
         });
 
         listenersAttached.current = true;
@@ -159,22 +249,76 @@ export const UserProvider = ({ children }) => {
             socket.off('session-ended');
             socket.off('removed-from-session');
             socket.off('host-change');
+            socket.off('new-dm-notification');
 
             isConnectingRef.current = false;
             listenersAttached.current = false;
         };
-    }, [handleCleanExit]); // re-run listener if sessionId changes to ensure correct filtering
+    }, [showNotification, handleCleanExit, isHost]); // empy to ensure it only runs once on mount
 
     return (
         <UserContext.Provider value={{
             name, setName, selectedColor, setSelectedColor, hasRegistered, 
             setHasRegistered, socket, isConnected, sessionId, setSessionId, sessionUsers, setSessionUsers, secureEmit,
-            handleCleanExit, isHost, setIsHost
+            handleCleanExit, isHost, setIsHost, allMessages, setAllMessages
         }}>
             {children}
+
+            {notification && (
+                <Animated.View 
+                    {...hideNotification.panHandlers}
+                    style={[
+                        styles.notificationBar,
+                        {
+                            transform: [{ translateY: slideAnim }]
+                        }
+                        ]}
+                >
+                    <TouchableOpacity
+                        activeOpacity={0.9}
+                        onPress={() => { 
+                            setNotification(null);
+                            navigationRef.navigate('Chat', { 
+                                isDirectMessage: true,
+                                dmRoomID: notification.roomID,
+                                recipientName: notification.title
+                            });
+                        }}
+                    >
+                        <Text style={styles.notificationTitle}>{notification.title}</Text>
+                        <Text style={styles.notificationText} numberOfLines={1}>{notification.message}</Text>
+                    </TouchableOpacity>
+                </Animated.View>
+            )}
         </UserContext.Provider>
     );
 };
+
+
+const styles = StyleSheet.create({
+    notificationBar: {
+        position: 'absolute',
+        top: 50, // Below the notch/status bar
+        left: 10,
+        right: 10,
+        backgroundColor: '#333',
+        padding: 15,
+        borderRadius: 10,
+        elevation: 10, // Shadow for Android
+        shadowColor: '#000', // Shadow for iOS
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        zIndex: 9999,
+    },
+    notificationTitle: { 
+        color: '#fff', 
+        fontWeight: 'bold' 
+    },
+    notificationText: { 
+        color: '#ccc', 
+        fontSize: 12 
+    }
+});
 
 // create "hook" to make using this data easy
 export const useUser = () => useContext(UserContext);

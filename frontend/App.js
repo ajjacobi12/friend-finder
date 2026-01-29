@@ -4,9 +4,7 @@
 
 // --- IMPORTS ----
 import React from 'react';
-import { TouchableOpacity, Text } from 'react-native';
-import { DefaultTheme, NavigationContainer, createNavigationContainerRef } from '@react-navigation/native'; // manages app state and links app to phone's back button
-//import { createNativeStackNavigator } from '@react-navigation/native-stack'; // creates a mechanism where screens behave like a deck of cards
+import { DefaultTheme, NavigationContainer } from '@react-navigation/native'; // manages app state and links app to phone's back button
 import { createStackNavigator, CardStyleInterpolators } from '@react-navigation/stack';
 import { UserProvider } from './UserContext' // "global memory", wrapping everything in this, every screen can access the same data without having to pass it manually every time
 import { navigationRef } from './navigationService';
@@ -79,7 +77,8 @@ export default function App() {
                     fontWeight: 'bold',
                     fontFamily: 'Courier',
                     color: '#2f2f4d'
-                  } }}
+                  } 
+                }}
                 />    
 
                 {/* map screen */}
@@ -96,7 +95,7 @@ export default function App() {
                 options={{ 
                   title: 'Chat',
                   headerTitleStyle: { 
-                    fontSize: 40, 
+                    fontSize: 20, 
                     fontWeight: 'bold',
                     fontFamily: 'Courier',
                     color: '#2f2f4d'
