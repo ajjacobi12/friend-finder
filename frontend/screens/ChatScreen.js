@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { View, Text, TouchableOpacity, TextInput, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Modal } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, FlatList, KeyboardAvoidingView, Platform, StyleSheet, InteractionManager } from 'react-native';
+import Modal from 'react-native-modal';
 import { useHeaderHeight } from '@react-navigation/elements';
 import { useUser } from '../UserContext';
 // import { styles } from '../styles';
@@ -18,12 +19,14 @@ export default function ChatScreen({ navigation, route }) {
 
     const typingTimeoutRef = useRef(null);
     const [isTyping, setIsTyping] = useState(false);
+    const isTypingRef = useRef(false);
 
     const handleTextChange = (text) => {
         setMessage(text);
 
         if (!isTyping) {
             setIsTyping(true);
+            isTypingRef.current = true;
             secureEmit('typing', { roomID: currentRoomID, name: name });
         }
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -52,18 +55,20 @@ export default function ChatScreen({ navigation, route }) {
         });
 
         return () => {
-            socket.off('user-typing');
-            socket.off('user-stop-typing');
-            if (isTyping) { // clean up on unmount
-                secureEmit('stop-typing', { roomID: currentRoomID });
-            }
+            InteractionManager.runAfterInteractions(() => {
+                socket.off('user-typing');
+                socket.off('user-stop-typing');
+                if (isTypingRef.current) { // clean up on unmount
+                    secureEmit('stop-typing', { roomID: currentRoomID });
+                }
+            })
         };
     }, [socket, isTyping]);
 
 
     useLayoutEffect(() => {
         navigation.setOptions({
-            title: isDirectMessage ? `Chat with ${recipientName}` : 'Group Chat',
+            title: isDirectMessage ? `${recipientName}` : 'Group Chat',
             headerStyle: {
             backgroundColor: '#ffffff',
             elevation: 0,
@@ -80,7 +85,7 @@ export default function ChatScreen({ navigation, route }) {
                 paddingVertical: 13,
                 borderRadius: 17, 
                 backgroundColor: selectedColor + '25' }}>
-            <Text style={{ color: '#000000', fontWeight: 'bold', fontSize: 12, textAlign: 'center'}}>{"☰ Direct"}{"\n"}{"Message"}</Text>
+            <Text style={{ color: '#000000', fontWeight: 'bold', fontSize: 12, textAlign: 'center'}}>{"Direct"}{"\n"}{"Message"}</Text>
         </TouchableOpacity>
         ),
     });
@@ -105,9 +110,21 @@ export default function ChatScreen({ navigation, route }) {
                 },
                 color: selectedColor,
                 time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                id: socket.id // to identify own messages
+                senderId: socket.id, // to identify own messages
+                isDM: !!isDirectMessage
             };
-            secureEmit('send-message', messageData);
+
+
+            if (isDirectMessage && dmRoomID) {
+                const targetId = dmRoomID.split('_').find(id => id !== socket.id);
+
+                secureEmit('send-direct-message', {
+                    ...messageData,
+                    recipientId: targetId,
+                });
+            } else {
+                secureEmit('send-message', messageData);
+            }
 
             setAllMessages((prevMessages) => ({
                 ...prevMessages,
@@ -200,37 +217,57 @@ export default function ChatScreen({ navigation, route }) {
         
         {/* --- SIDEBAR FOR USER LIST --- */}
         <Modal
-            animationType="slide"
-            transparent={true}
-            visible={isSidebarVisible}
-            onRequestClose={() => setIsSidebarVisible(false)}
+            isVisible={isSidebarVisible}
+            onBackdropPress={() => setIsSidebarVisible(false)}
+            onBackButtonPress={() => setIsSidebarVisible(false)}
+            onSwipeComplete={() => setIsSidebarVisible(false)}
+            swipeDirection="right"
+            animationIn="slideInRight"
+            animationOut="slideOutRight"
+            animationOutTiming={300}
+            hideModalContentWhileAnimating={true}
+            swipeThreshold={50}
+            useNativeDriver={true}
+            useNativeDriverForBackdrop={true}
+            backdropTransitionOutTiming={0}
+            backdropColor='#f5f5f5'
+            style={{ 
+                margin: 0,
+                justifyContent: 'flex-end',
+                flexDirection: 'row'
+             }}
+            backdropOpacity={0.3}
         >
-            <View style={styles.modalOverlay}>
-                <View style={styles.sidebarContainer}>
-                    <View style={styles.sidebarHeader}>
-                        <Text style={styles.sidebarTitle}>Direct Message</Text>
-                        <TouchableOpacity onPress={() => setIsSidebarVisible(false)}>
-                            <Text style={{ fontSize: 24, fontWeight: 'bold', padding: 10 }}>✕</Text>
-                        </TouchableOpacity>
-                    </View>
-                    <FlatList
-                        data={sessionUsers.filter(u => u.id !== socket.id)} // exclude self from user list
-                        keyExtractor={(item) => item.id}
-                        renderItem={({ item }) => (
-                            <TouchableOpacity
-                                style={styles.userItem}
-                                onPress={() => startPrivateChat(item)}
-                            >
-                                    <View style={[styles.userDot, { backgroundColor: item.color }]} />
-                                    <Text style={styles.userName}>{item.name}</Text>
-                                    <Text style={{color: '#999'}}>Chat ➔</Text>
-                            </TouchableOpacity>
-                        )}
-                    />
+            <View style={styles.sidebarContainer}>
+                <View style={styles.sidebarHeader}>
+                    <Text style={styles.sidebarTitle}>Direct Messages</Text>
+                    <TouchableOpacity onPress={() => setIsSidebarVisible(false)}>
+                        <Text style={{ fontSize: 24, fontWeight: 'bold', padding: 10 }}>✕</Text>
+                    </TouchableOpacity>
                 </View>
+                <FlatList
+                    data={sessionUsers.filter(u => u.id !== socket.id)} // exclude self from user list
+                    keyExtractor={(item) => item.id}
+                    ListEmptyComponent={() => (
+                        <View style={{ marginTop: 20, alignItems: 'center' }}>
+                            <Text style={{ color: '#999', fontStyle: 'italic' }}>
+                                No other users online right now.
+                            </Text>
+                        </View>
+                    )}
+                    renderItem={({ item }) => (
+                        <TouchableOpacity
+                            style={styles.userItem}
+                            onPress={() => startPrivateChat(item)}
+                        >
+                            <View style={[styles.userDot, { backgroundColor: item.color }]} />
+                            <Text style={styles.userName}>{item.name}</Text>
+                            <Text style={{color: '#999'}}>Chat ➔</Text>
+                        </TouchableOpacity>
+                    )}
+                />
             </View>
         </Modal>
-
     </View>
     );
 }
@@ -283,22 +320,18 @@ const styles = StyleSheet.create({
         backgroundColor: '#007aff',
         borderRadius: 20,
     },
-    modalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        justifyContent: 'flex-end', // This makes it slide from bottom, or align right
-    },
     sidebarContainer: {
-        backgroundColor: 'white',
+        backgroundColor: '#ffffff',
         width: '80%',
         height: '100%',
         alignSelf: 'flex-end', // Pushes sidebar to the right
         paddingTop: 50,
         paddingHorizontal: 20,
+        backfaceVisibility: 'hidden',
         shadowColor: '#000',
-        shadowOffset: { width: -2, height: 0 },
-        shadowOpacity: 0.2,
-        shadowRadius: 10,
+        shadowOffset: { width: -5, height: 0 },
+        shadowOpacity: 0.1,
+        shadowRadius: 5,
         elevation: 5,
     },
     sidebarHeader: {

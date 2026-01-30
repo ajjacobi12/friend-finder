@@ -5,9 +5,10 @@
 // --- IMPORTS ----
 import React from 'react';
 import { DefaultTheme, NavigationContainer } from '@react-navigation/native'; // manages app state and links app to phone's back button
-import { createStackNavigator, CardStyleInterpolators } from '@react-navigation/stack';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { UserProvider } from './UserContext' // "global memory", wrapping everything in this, every screen can access the same data without having to pass it manually every time
 import { navigationRef } from './navigationService';
+import { TouchableOpacity, Pressable, Text, View} from 'react-native';
 
 // import screens
 import ProfileScreen from './screens/ProfileScreen'
@@ -18,7 +19,7 @@ import LoginScreen from './screens/LoginScreen'
 
 // initializing the Stack tool to allow screens to slide on top of each other
 // two components: stack.navigator (the manager) and stack.screen (the individual pages)
-const Stack = createStackNavigator();
+const Stack = createNativeStackNavigator();
 
 const myTheme = {
   ...DefaultTheme,
@@ -40,16 +41,20 @@ export default function App() {
             <Stack.Navigator 
               initialRouteName="Login"
               screenOptions={{
-                headerStyle: { 
-                  backgroundColor: '#ffffff',
-                  elevation: 0,
-                  shadowOpacity: 0,
-                  borderBottomWidth: 0,
-                },
-                cardStyle: { backgroundColor: '#ffffff' },
-                headerMode: 'screen',
+                headerTitleAlign: 'center',
+                headerTopInsetEnabled: false,
+                headerTranslucent: true,
                 headerShadowVisible: false,
-                cardStyleInterpolator: CardStyleInterpolators.forFadeFromBottomAndroid,
+                headerLargeTitle: false,
+                headerHideShadow: true,
+                headerStyle: { backgroundColor: '#ffffff' },
+                contentStyle: { backgroundColor: '#ffffff' },
+                headerBackgroundColor: '#ffffff',
+                animation: 'slide_from_left',
+                freezeOnBlur: true,
+                headerTitleStyle: { 
+                  fontSize: 20
+                },
               }}>
 
                 {/* initialRouteName dictates which screen first pops up upon opening app */}
@@ -58,9 +63,15 @@ export default function App() {
 
                 {/* initial screen */}
                 <Stack.Screen
-                name="Login" 
-                component={LoginScreen} 
-                options={{ title: 'Login' }} 
+                  name="Login" 
+                  component={LoginScreen} 
+                  options={{ 
+                    title: 'Login',
+                    headerStyle: {
+                      backgroundColor: '#ffffff',
+                      height: 125,
+                    }
+                 }} 
                 />  
                 {/* ID of the screen */}
                 {/* links name to actual file imported */}
@@ -68,54 +79,73 @@ export default function App() {
 
                 {/* profile screen */}
                 <Stack.Screen
-                name="Profile"
-                component={ProfileScreen}
-                options={{ 
-                  title: 'Profile Setup',
-                  headerTitleStyle: { 
-                    fontSize: 27, 
-                    fontWeight: 'bold',
-                    fontFamily: 'Courier',
-                    color: '#2f2f4d'
-                  } 
-                }}
+                  name="Profile"
+                  component={ProfileScreen}
+                  options={{ 
+                    title: 'Profile Setup',
+                    headerTitleStyle: { 
+                      fontSize: 27, 
+                      fontWeight: 'bold',
+                      fontFamily: 'Courier',
+                      color: '#2f2f4d'
+                    } ,
+                    headerStyle: {
+                      backgroundColor: '#ffffff',
+                      height: 125,
+                    }
+                  }}
                 />    
 
                 {/* map screen */}
                 <Stack.Screen
-                name="Map"
-                component={MapScreen}
-                options={{ title: 'Friend Map' }}
+                  name="Map"
+                  component={MapScreen}
+                  options={{ 
+                    title: 'Friend Map',
+                    headerStyle: {
+                      backgroundColor: '#ffffff',
+                      height: 125,
+                    }
+                  }}
                 />
 
                 {/* chat screen */}
                 <Stack.Screen
                 name="Chat"
-                component={ChatScreen}
-                options={{ 
-                  title: 'Chat',
-                  headerTitleStyle: { 
-                    fontSize: 20, 
-                    fontWeight: 'bold',
-                    fontFamily: 'Courier',
-                    color: '#2f2f4d'
-                  }
-                 }}
+                  component={ChatScreen}
+                  options={{ 
+                    title: 'Chat',
+                    headerTitleStyle: { 
+                      fontSize: 20, 
+                      fontWeight: 'bold',
+                      fontFamily: 'Courier',
+                      color: '#2f2f4d'
+                    },
+                    headerStyle: {
+                      backgroundColor: '#ffffff',
+                      height: 125,
+                    }
+                  }}
                 />           
 
                 {/* home screen */}
                 <Stack.Screen
                 name="Home"
-                component={HomeScreen}
-                options={{ 
-                  title: 'Lobby',
-                  headerTitleStyle: { 
-                    fontSize: 40, 
-                    fontWeight: 'bold',
-                    fontFamily: 'Courier',
-                    color: '#2f2f4d'
-                  }
-                 }}
+                  component={HomeScreen}
+                  options={{
+                    title: 'Lobby',
+                    headerTitleStyle: { 
+                      fontSize: 40, 
+                      fontWeight: 'bold',
+                      fontFamily: 'Courier',
+                      color: '#2f2f4d'
+                    },
+                    headerStyle: {
+                      backgroundColor: '#ffffff',
+                      height: 125,
+                    },
+                    headerLeft: () => null // removes back button
+                  }}
                 />
 
             </Stack.Navigator>

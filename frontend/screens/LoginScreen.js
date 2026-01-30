@@ -8,7 +8,7 @@ import { KeyboardAvoidingView } from 'react-native';
 const { width } = Dimensions.get('window');
 
 export default function LoginScreen( { navigation }) {
-    const { setSessionId, secureEmit, setSessionUsers, isConnected, setIsHost } = useUser();
+    const { setSessionId, secureEmit, setSessionUsers, isConnected, setIsHost, justCreatedSession } = useUser();
     const [tempCode, setTempCode] = useState(''); // tempCode holds what user is typing into textInput before hitting "join"
     const [errorMsg, setErrorMsg]  = useState('');
     // const [isJoining, setIsJoining] = useState(false);
@@ -20,6 +20,7 @@ export default function LoginScreen( { navigation }) {
     const startNewSession = () => {
         if (loading || !isConnected) return;
         setLoading(true);
+        justCreatedSession.current = true;
         // generate random 6 character key
         const newId = Math.random().toString(36).substring(2, 8).toUpperCase();
         // tell server to create and track this room

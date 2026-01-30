@@ -1,6 +1,7 @@
 // 1. import the "engines"
 const express = require('express'); // pulls blueprints for express framework
-const { isBigIntObject } = require('util/types');
+const { send } = require('process');
+const { text } = require('stream/consumers');
 const app = express(); // creates an instance of Express app, handles web routes and logic
 const http = require('http').createServer(app); // the "wrapping", takes built-in Node "http" module and creates physical server, passes app into it so the server knows to use Express to handle incoming web requests
 const io = require('socket.io')(http, {
@@ -273,58 +274,49 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
 
     // --- MESSAGING ----
 
+    const formatOutboundMessage = (user, roomID, context, isDM, senderID) => ({
+        roomID,
+        sender: user.name,
+        color: user.color,
+        context: {
+            text: context.text,
+            isEncrypted: context.isEncrypted || false,
+            version: context.version || "1.0"
+        },
+        id: senderID,
+        isDirectMessage: isDM,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        serverTimestamp: new Date().toISOString()
+    });
+
     socket.on('send-message', (messageData) => {
-        const { roomID, context } = messageData;
-        const text = context?.text;
-        const user = activeUsers[socket.id];
-
+        const sender = activeUsers[socket.id];
         // validate the message, don't process empty data
-        if (!user || !roomID || !text || text.trim().length === 0) return;
-
-        // sanitization: prevent basic XSS (if not encrypted yet)
-        // if sending raw text, escape html tags
-        const sanitizedText = text.replace(/<[^>]*>?/gm, '');
-
-
-        // room security check (contains an _ based on join logic)
-        if (roomID.includes('_')) {
-            // logic for DMs
-            const recipientID = roomID.split('_').find(id => id !== socket.id);
-            const recipientSocket = io.sockets.sockets.get(recipientID);
-            if (recipientSocket) {
-                recipientSocket.join(roomID);
-
-                // notify user that they have received a DM
-                recipientSocket.emit('new-dm-notification', {
-                    fromName: user.name,
-                    fromID: socket.id,
-                    roomID: roomID,
-                    text: sanitizedText
-                });
-            }
-        } else {
-            const joinedRooms = Array.from(socket.rooms);
-            if (!joinedRooms.includes(roomID)) {
-                console.log(`Security Alert: User ${socket.id} attempted to send message to room ${roomID} without joining it.`);
-                return;
-            }
-        }
+        if (!sender || !messageData.context?.text?.trim() ) return;
 
         // reconstruct package, don't just send 'messagData', only emit what's necessary
-        const outboundData = {
-            ...messageData,
-            sender: user.name,
-            color: user.color,
-            context: {
-                ...messageData.context,
-                text: sanitizedText
-            },
-            serverTimestamp: new Date().toISOString()
-        };
+        const outboundData = formatOutboundMessage(sender, messageData.roomID, messageData.context, false, socket.id);
 
         // broadcast to everyone in room except sender
-        socket.to(roomID).emit('receive-message', outboundData);
-        console.log(`[CHAT] Room ${roomID} | ${user.name}: ${sanitizedText}`);
+        socket.to(messageData.roomID).emit('receive-message', outboundData);
+        console.log(`[CHAT] Room ${messageData.roomID} | ${sender.name}: ${outboundData.context.text}`);
+    });
+
+    socket.on('send-direct-message', (messageData) => {
+        const sender = activeUsers[socket.id];
+        const { recipientId, context } = messageData;
+
+        if (!sender || !context?.text?.trim() || !recipientId) return;
+        
+        const dmRoomID = [socket.id, recipientId].sort().join('_');
+        const outboundData = formatOutboundMessage(sender, dmRoomID, context, true, socket.id);
+
+        const recipientSocket = io.sockets.sockets.get(recipientId);
+
+        if (recipientSocket) {
+            recipientSocket.emit('receive-message', outboundData);
+        }
+        console.log(`Direct message from ${messageData.sender} to ${messageData.recipientId}: ${messageData.context.text}`);
     });
 
     socket.on('join-dm', ( {dmRoomID, targetName} ) => {
@@ -334,8 +326,9 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
 
     socket.on('typing', (data) => {
         socket.to(data.roomID).emit('user-typing', {
+            roomID: data.roomID,
             name: data.name,
-            id:socket.id
+            id: socket.id
         }); 
     });
 

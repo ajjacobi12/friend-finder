@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "react-native-text-ticker": "^1.15.0"
+  }
+}

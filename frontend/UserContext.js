@@ -23,6 +23,7 @@ export const UserProvider = ({ children }) => {
     const [isHost, setIsHost] = useState(false);
     const [notification, setNotification] = useState(null);
     const [allMessages, setAllMessages] = useState({});
+    const justCreatedSession = useRef(false);
 
     
     const slideAnim = useRef(new Animated.Value(-100)).current;
@@ -107,6 +108,12 @@ export const UserProvider = ({ children }) => {
             'create-session', 
             'update-user', 
             'leave-session',
+            'send-message',
+            'send-direct-message',
+            'join-dm',
+            'transfer-host',
+            'remove-user',
+            'end-session'
         ];
 
         if (infrastructureEvents.includes(eventName)) {
@@ -115,22 +122,7 @@ export const UserProvider = ({ children }) => {
             // future encryption here
             socket.emit(eventName, data, callback);
         }
-    };
-
-    // save messages in chat
-    useEffect(() => {
-        if (!socket) return;
-        socket.on('receive-message', (data) => {
-            setAllMessages((prevMessages) => ({
-                ...prevMessages,
-                [data.roomID]: [...(prevMessages[data.roomID] || []), data]
-            }));
-        });
-
-        return () => {
-            socket.off('receive-message');
-        };
-    }, [socket]);     
+    };  
 
     // ----- Handle global user updates & connection -----
 
@@ -159,7 +151,6 @@ export const UserProvider = ({ children }) => {
     // if disconnecting/connection drops then start cleanup
     // if user-update is sent then play sound and update user list
     const listenersAttached = useRef(false);
-    const isInitialHostAssignment = useRef(true);
     useEffect(() => {
         if (!socket || listenersAttached.current) return;
 
@@ -216,25 +207,40 @@ export const UserProvider = ({ children }) => {
 
         socket.on('host-change', (newHostId) => {
             if (socket.id === newHostId) {
-                if (!isInitialHostAssignment.current) {
-                    Alert.alert("You are now the host of this session.");
+                if (!justCreatedSession.current) {
+                    showNotification({ 
+                        title: "👑 System Update", 
+                        message: "You are now the host of this session.",
+                        type: 'info'
+                    });
                 }
                 setIsHost(true);
             } else {
                 setIsHost(false);
             }
-            isInitialHostAssignment.current = false;
+            justCreatedSession.current = false;
         });
 
-        socket.on('new-dm-notification', (data) => {
-            // if already in room, no alert
-            if (navigationRef.getCurrentRoute()?.params?.dmRoomID === data.roomID) return;
+        socket.on('receive-message', (data) => {
+            // saves messages to chat history
+            setAllMessages((prevMessages) => ({
+                ...prevMessages,
+                [data.roomID]: [...(prevMessages[data.roomID] || []), data]
+            }));
 
+            // check if user is already viewing this chat
+            const currentParams = navigationRef.getCurrentRoute()?.params; 
+            const isActiveRoom = currentParams?.roomID === data.roomID || currentParams?.dmRoomID === data.roomID;
+            if (isActiveRoom) return;
+
+            // show notification
+            const notificationTitle = data.isDirectMessage ? `💬 ${data.sender}` : `👥 General Chat (${data.sender})`;
             showNotification({
-                title: data.fromName,
-                message: data.text,
+                title: notificationTitle,
+                message: data.context?.text || "New message",
                 roomID: data.roomID,
-                fromID: data.fromID,
+                fromID: data.id,
+                isDM: data.isDirectMessage
             });
         });
 
@@ -250,6 +256,7 @@ export const UserProvider = ({ children }) => {
             socket.off('removed-from-session');
             socket.off('host-change');
             socket.off('new-dm-notification');
+            socket.off('receive-message');
 
             isConnectingRef.current = false;
             listenersAttached.current = false;
@@ -260,7 +267,7 @@ export const UserProvider = ({ children }) => {
         <UserContext.Provider value={{
             name, setName, selectedColor, setSelectedColor, hasRegistered, 
             setHasRegistered, socket, isConnected, sessionId, setSessionId, sessionUsers, setSessionUsers, secureEmit,
-            handleCleanExit, isHost, setIsHost, allMessages, setAllMessages
+            handleCleanExit, isHost, setIsHost, allMessages, setAllMessages, justCreatedSession
         }}>
             {children}
 
@@ -278,14 +285,17 @@ export const UserProvider = ({ children }) => {
                         activeOpacity={0.9}
                         onPress={() => { 
                             setNotification(null);
-                            navigationRef.navigate('Chat', { 
-                                isDirectMessage: true,
-                                dmRoomID: notification.roomID,
-                                recipientName: notification.title
-                            });
+                                if (notification.roomID)    {
+                                    navigationRef.navigate('Chat', { 
+                                        isDirectMessage: notification.isDM,
+                                        roomID: !notification.isDM ? notification.roomID : undefined,
+                                        dmRoomID: notification.isDM ? notification.roomID : undefined,
+                                        recipientName: notification.isDM ? notification.title.replace('💬 ', '') : undefined,
+                                    });
+                                }
                         }}
                     >
-                        <Text style={styles.notificationTitle}>{notification.title}</Text>
+                        <Text style={[styles.notificationTitle, {marginBottom: 2}]}>{notification.title}</Text>
                         <Text style={styles.notificationText} numberOfLines={1}>{notification.message}</Text>
                     </TouchableOpacity>
                 </Animated.View>
@@ -298,7 +308,7 @@ export const UserProvider = ({ children }) => {
 const styles = StyleSheet.create({
     notificationBar: {
         position: 'absolute',
-        top: 50, // Below the notch/status bar
+        top: 10, // Below the notch/status bar
         left: 10,
         right: 10,
         backgroundColor: '#333',

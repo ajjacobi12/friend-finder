@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "MyApp",
+    "slug": "my-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#ffffff",
+    "android": {
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "backgroundColor": "#ffffff"
+    }
+  }
+}

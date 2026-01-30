@@ -5,7 +5,7 @@ export const styles = StyleSheet.create({
     // this organizes all styles into one object, better than a plain object because it provides autofill and catches errors
     container: { // main screen
         flex: 1, // tells view to expand and fill entire screen
-        backgroundColor: '#f2f2f7', // light grey background
+        backgroundColor: '#ffffff', // light grey background
         alignItems: 'center', // centers all the children (labels, cards) horizontally 
         justifyContent: 'flex-start', // centers everything vertically
         paddingTop: 10, //manual centering for top portion

@@ -29,6 +29,12 @@ export default function ProfileScreen({ navigation }) {
             }
         }
     }, [friends]);
+
+    useEffect(() => {
+        if (name && !tempName) {
+            setTempName(name);
+        }
+    }, [name]);
     
     const handleJoin = () => {
         // make sure user has input a name
@@ -144,11 +150,11 @@ export default function ProfileScreen({ navigation }) {
                 
                 {errorMsg ? <Text style={{color: 'red'}}>{errorMsg}</Text> : null}
                 
-                {!hasRegistered && (
+                {(sessionId && !hasRegistered) ? (
                     <TouchableOpacity style={styles.button} onPress={handleJoin}>
                         <Text style={styles.buttonText}>Enter Lobby</Text>
                     </TouchableOpacity>
-                )}
+                ) : null}
 
         </View>
     );
