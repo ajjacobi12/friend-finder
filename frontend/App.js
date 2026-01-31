@@ -47,6 +47,7 @@ export default function App() {
                 headerShadowVisible: false,
                 headerLargeTitle: false,
                 headerHideShadow: true,
+                headerMode: 'screen',
                 headerStyle: { backgroundColor: '#ffffff' },
                 contentStyle: { backgroundColor: '#ffffff' },
                 headerBackgroundColor: '#ffffff',
@@ -66,11 +67,12 @@ export default function App() {
                   name="Login" 
                   component={LoginScreen} 
                   options={{ 
-                    title: 'Login',
-                    headerStyle: {
-                      backgroundColor: '#ffffff',
-                      height: 125,
-                    }
+                    // title: 'Login',
+                    // headerStyle: {
+                    //   backgroundColor: '#ffffff',
+                    //   height: 125,
+                    // }
+                    headerShown: false
                  }} 
                 />  
                 {/* ID of the screen */}
@@ -88,11 +90,13 @@ export default function App() {
                       fontWeight: 'bold',
                       fontFamily: 'Courier',
                       color: '#2f2f4d'
-                    } ,
+                    },
                     headerStyle: {
                       backgroundColor: '#ffffff',
                       height: 125,
-                    }
+                    },
+                    headerShown: false,
+                    cardStyle: { backgroundColor: '#ffffff'}
                   }}
                 />    
 
@@ -124,28 +128,16 @@ export default function App() {
                     headerStyle: {
                       backgroundColor: '#ffffff',
                       height: 125,
-                    }
+                    },
+                    headerShown: false
                   }}
                 />           
 
                 {/* home screen */}
                 <Stack.Screen
-                name="Home"
+                  name="Home"
                   component={HomeScreen}
-                  options={{
-                    title: 'Lobby',
-                    headerTitleStyle: { 
-                      fontSize: 40, 
-                      fontWeight: 'bold',
-                      fontFamily: 'Courier',
-                      color: '#2f2f4d'
-                    },
-                    headerStyle: {
-                      backgroundColor: '#ffffff',
-                      height: 125,
-                    },
-                    headerLeft: () => null // removes back button
-                  }}
+                  options={{ headerShown: false}}
                 />
 
             </Stack.Navigator>

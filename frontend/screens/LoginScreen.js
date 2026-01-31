@@ -1,20 +1,52 @@
 // ----- IMPORTS -------
 import React, { useState, useLayoutEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StatusBar, Animated, Dimensions, Platform } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StatusBar, Animated, Dimensions, Platform, Keyboard, TouchableWithoutFeedback, PanResponder } from 'react-native';
 import { styles } from '../styles';
 import { useUser } from '../UserContext';
 import { KeyboardAvoidingView } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
+
 export default function LoginScreen( { navigation }) {
     const { setSessionId, secureEmit, setSessionUsers, isConnected, setIsHost, justCreatedSession } = useUser();
     const [tempCode, setTempCode] = useState(''); // tempCode holds what user is typing into textInput before hitting "join"
     const [errorMsg, setErrorMsg]  = useState('');
-    // const [isJoining, setIsJoining] = useState(false);
+    const [isJoinScreen, setIsJoinScreen] = useState(false);
     const [loading, setLoading] = useState(false);
 
     const slideAnim = useRef(new Animated.Value(0)).current;
+
+    const panResponder = React.useMemo(() =>
+        PanResponder.create({
+            onStartShouldSetPanResponderCapture: () => false, // capture touch immediately
+            onStartShouldSetPanResponder: () => isJoinScreen,
+            onMoveShouldSetPanResponder: (event, gestureState) => {
+                // only capture if on screen 2 (slideAnim at -width)
+                // and if user swipes right dx > 10, ensure vertical movement is also small
+                return Math.abs(gestureState.dy) < 10 && gestureState.dx > 10 && isJoinScreen;
+            },
+            // prevent other components from canceling the swipe
+            onPanResponderTerminationRequest: () => false,
+            onPanResponderMove: (event, gestureState) => {
+                // starting position is -width, add finger movement (dx) to it
+                // cap at 0 so screen can slide too far right
+                const newX = Math.min(-width + gestureState.dx, 0);
+                slideAnim.setValue(newX);
+            },
+            onPanResponderRelease: (event, gestureState) => {
+                // if swipe more than 1/5 of screen, finish transition
+                if (gestureState.dx > width / 5) { 
+                    hideJoinInput();
+                } else { //snap back to screen 2
+                    Animated.spring(slideAnim, {
+                        toValue: -width,
+                        useNativeDriver: true,
+                        friction: 2
+                    }).start();
+                }
+            },
+    }), [isJoinScreen]);
 
     // ------ START NEW SESSION --------
     const startNewSession = () => {
@@ -75,6 +107,7 @@ export default function LoginScreen( { navigation }) {
 
     // --- ANIMATION LOGIC ---
     const showJoinInput = () => {
+        setIsJoinScreen(true);
         setErrorMsg("");
         Animated.timing(slideAnim, {
             toValue: -width, // slide whole container left by one screen width
@@ -84,11 +117,12 @@ export default function LoginScreen( { navigation }) {
     };
 
     const hideJoinInput = () => {
+        setIsJoinScreen(false);
         setTempCode(""); // clears input when going back
         setErrorMsg("");
         Animated.timing(slideAnim, {
             toValue: 0, // slide back to original position
-            duration: 300,
+            duration: 200,
             useNativeDriver: true,
         }).start();
     };
@@ -107,13 +141,16 @@ export default function LoginScreen( { navigation }) {
     }
 
     return (
-        <View style={{ flex: 1, backgroundColor: '#ffffff', overflow: 'hidden' }}>
+        <View style={{ flex: 1, backgroundColor: '#ffffff', overflow: 'hidden' }} {...panResponder.panHandlers}>
             <StatusBar barStyle="dark-content" />
 
             <KeyboardAvoidingView   
                 behavior={Platform.OS === "ios" ? "padding" : "height"}
                 style={{ flex: 1 }}
             > 
+            <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+            <View style={{ flex: 1, alignItems: 'flex-start', justifyContent: 'center', width: width }}>
+
                 <Animated.View style={{
                     flexDirection: 'row',
                     width: width * 2, // double width to hold both screens side by side
@@ -125,30 +162,30 @@ export default function LoginScreen( { navigation }) {
                 <View style={{ width: width, alignItems: 'center', justifyContent: 'center',paddingHorizontal: 20 }}>
                     {/* new session button */}
                     <TouchableOpacity 
-                        style={[styles.button, { width: '100%', height: 100, justifyContent: 'center'}]} 
+                        style={[styles.button, { width: '100%', height: 100, justifyContent: 'center', paddingHorizontal: 25}]} 
                         onPress={startNewSession}
                         disabled={loading}
                     >
-                        <Text style={[styles.buttonText, {fontSize: 32 }]}>
-                            {loading ? "Creating..." : "Start New Session"}
+                        <Text style={[styles.buttonText, {fontSize: 40, textAlign: 'center' }]}>
+                            {loading ? "Creating..." : "New Session"}
                         </Text>
                     </TouchableOpacity>
 
-                    <View style={{ marginVertical: 30, backgroundColor: '#ccc', height: 2, width: '80%' }} />
+                    <View style={{ marginVertical: 40, backgroundColor: '#ccc', height: 2, width: '80%' }} />
 
                     {/* join session button */}
                     <TouchableOpacity 
-                        style={[styles.button, { backgroundColor: '#77e1ede4', marginTop: 10, width: '100%', height: 100, justifyContent: 'center'}]} 
+                        style={[styles.button, { backgroundColor: '#77e1ede4', marginTop: 0, width: '100%', height: 100, justifyContent: 'center'}]} 
                         onPress={showJoinInput}
                         disabled={loading}
                     >
-                        <Text style={[styles.buttonText, {fontSize:40}]}>Join Session</Text>
+                        <Text style={[styles.buttonText, {fontSize: 40}]}>Join Session</Text>
                     </TouchableOpacity>
                 </View>
                    
                 {/* ---- SCREEN 2: JOIN INPUT (RIGHT) ---- */}
-                <View style={{ width: width, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 }}>
-                    
+                <View style={{ width: width, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20, marginTop: 50 }}>
+
                     {/* back button */}
                     <TouchableOpacity 
                         onPress={hideJoinInput}
@@ -203,6 +240,8 @@ export default function LoginScreen( { navigation }) {
                     </TouchableOpacity>
                 </View>
             </Animated.View>
+        </View>
+        </TouchableWithoutFeedback>
         </KeyboardAvoidingView>
     </View>
     );

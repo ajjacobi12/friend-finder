@@ -1,6 +1,6 @@
 // ---- imports ------
 import React, { useState, useCallback, useRef, useEffect } from 'react'; // useState lets app remember things (eg. messages), useEffect allows app to perform actions (eg. connecting ot the server) as soon as it opens
-import { Text, View, StatusBar, TouchableOpacity, TextInput } from 'react-native'; // components; similar to HTML's tags <div> or <h1>, view = <div>, text for all strings
+import { Text, View, StatusBar, TouchableOpacity, Pressable, TextInput } from 'react-native'; // components; similar to HTML's tags <div> or <h1>, view = <div>, text for all strings
 import { useFocusEffect } from '@react-navigation/native';
 import { styles } from '../styles';
 import { useUser } from '../UserContext';
@@ -19,6 +19,7 @@ export default function ProfileScreen({ navigation }) {
     const [tempName, setTempName] = useState(name);
     const friends = sessionUsers.filter(u => u.id !== socket.id);
 
+    // --- KEEPING TRACK OF COLORS ALREADY SELECTED BY FRIENDS -----
     useEffect(() => {
         const takenColors = friends.map(f => f.color);
         if (!selectedColor || takenColors.includes(selectedColor)) {
@@ -30,12 +31,14 @@ export default function ProfileScreen({ navigation }) {
         }
     }, [friends]);
 
+    // --- REMEMBER PREVIOUS NAMES ENTERED ----
     useEffect(() => {
         if (name && !tempName) {
             setTempName(name);
         }
     }, [name]);
     
+    // --- ENTER THE LOBBY FOR THE FIRST TIME ----
     const handleJoin = () => {
         // make sure user has input a name
         if (!tempName || tempName.trim() === "") {
@@ -62,55 +65,53 @@ export default function ProfileScreen({ navigation }) {
         setHasRegistered(true);
 
         // navigate to home screen
-        setTimeout(() => {
-            navigation.reset({
-                index: 0,
-                routes: [{ name: 'Home' }],
-         });
-        }, 0);
+
+        navigation.reset({
+            index: 0,
+            routes: [{ name: 'Home' }],
+        });
     };
 
-    const nameRef = useRef(name);
-    useEffect(() => {
-        nameRef.current = tempName;
-    }, [tempName]);
-
-    const isCleaningUp = useRef(false);
-    useFocusEffect(
-        useCallback(() => {
-            return () => {
-                if (hasRegistered) {
-                    setName(nameRef.current);  
-                }
-            };
-        }, [hasRegistered, setName])
-    );
-
-    useEffect(() => {
-        const unsubscribe = navigation.addListener('beforeRemove', (e) => {
-            const actionType = e?.action?.type;
-
-            if (hasRegistered || isCleaningUp.current || actionType === 'RESET') {
-                return;
-            }
-            
-            isCleaningUp.current = true;
-            console.log("Back-exit button detected. Cleaning up...");
-
-            if (sessionId) {
+    // --- GO BACK TO LOGIN SCREEN OR LOBBY ---
+    const handleBack = () => {
+        // if entering the profile setup for the first time and going back to login screen
+        if(!hasRegistered)  {
+            console.log("User cancelled setup. Returning to login and cleaning up.");
+            if (sessionId)  {
                 secureEmit('leave-session', sessionId);
             }
-
             handleCleanExit();
-        });
-
-        return unsubscribe;
-    }, [navigation, secureEmit, sessionId, hasRegistered, handleCleanExit]);
-
+        } else { // user was editing profile
+            setName(tempName);
+            navigation.goBack();
+        }
+    };
 
     return (
         <View style={styles.container}>
             <StatusBar barStyle="dark-content" />
+            <View style={styles.customHeader}>
+                <Pressable
+                    onPress={handleBack}
+                    style={({ pressed }) => ({
+                        marginLeft: 10, 
+                        marginTop: 50,
+                        height: 45,
+                        paddingHorizontal: 10, 
+                        paddingVertical: 10,
+                        borderRadius: 20, 
+                        backgroundColor: '#007aff' + '25',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderWidth: 1,
+                        borderColor: '#007bff52'
+                    })}>
+                        <Text style={{ color: 'black', fontSize: 20, textAlign: 'center'}}>{hasRegistered ? "❮ Lobby" : "❮ Login"}</Text>
+                </Pressable>
+                <View style={{ position: 'absolute', left: 0, right: 0, justifyContent: 'center', alignItems: 'center' }}>
+                    <Text style={{ fontFamily: 'Courier', fontSize: 30, fontWeight: 'bold', marginTop:60 }}>Profile</Text>
+                </View>
+            </View>
             
             <Text style={[styles.title, {fontSize: 26}]}>Set your username</Text>
                 <View style={styles.box}>
@@ -152,7 +153,7 @@ export default function ProfileScreen({ navigation }) {
                 
                 {(sessionId && !hasRegistered) ? (
                     <TouchableOpacity style={styles.button} onPress={handleJoin}>
-                        <Text style={styles.buttonText}>Enter Lobby</Text>
+                        <Text style={[styles.buttonText, { fontSize: 25}]}>Enter Lobby</Text>
                     </TouchableOpacity>
                 ) : null}
 

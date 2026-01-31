@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { View, Text, TouchableOpacity, TextInput, FlatList, KeyboardAvoidingView, Platform, StyleSheet, InteractionManager } from 'react-native';
+import { View, Text, TouchableOpacity, Pressable, TextInput, FlatList, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import Modal from 'react-native-modal';
 import { useHeaderHeight } from '@react-navigation/elements';
 import { useUser } from '../UserContext';
-// import { styles } from '../styles';
 
 export default function ChatScreen({ navigation, route }) {
     const { isDirectMessage, dmRoomID, recipientName } = route.params || {};
@@ -51,45 +50,19 @@ export default function ChatScreen({ navigation, route }) {
                 const newState = { ...prev };
                 delete newState[data.id];
                 return newState;
-            }   );
+            });
         });
 
         return () => {
-            InteractionManager.runAfterInteractions(() => {
-                socket.off('user-typing');
-                socket.off('user-stop-typing');
-                if (isTypingRef.current) { // clean up on unmount
-                    secureEmit('stop-typing', { roomID: currentRoomID });
-                }
-            })
+            socket.off('user-typing');
+            socket.off('user-stop-typing');
+            if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+            if (isTypingRef.current) { // clean up on unmount
+                secureEmit('stop-typing', { roomID: currentRoomID });
+            }
+            setTypingUsers({});
         };
-    }, [socket, isTyping]);
-
-
-    useLayoutEffect(() => {
-        navigation.setOptions({
-            title: isDirectMessage ? `${recipientName}` : 'Group Chat',
-            headerStyle: {
-            backgroundColor: '#ffffff',
-            elevation: 0,
-            shadowOpacity: 0,
-            height: 125,
-        },
-    headerRight: () => (
-        <TouchableOpacity 
-            activeOpacity={1}
-            onPress={() => setIsSidebarVisible(true)}  // () => means do this only when button is pressed
-            style={{ 
-                marginRight: 15, 
-                paddingHorizontal: 10,
-                paddingVertical: 13,
-                borderRadius: 17, 
-                backgroundColor: selectedColor + '25' }}>
-            <Text style={{ color: '#000000', fontWeight: 'bold', fontSize: 12, textAlign: 'center'}}>{"Direct"}{"\n"}{"Message"}</Text>
-        </TouchableOpacity>
-        ),
-    });
-    }, [navigation, isDirectMessage, recipientName, selectedColor]);
+    }, [socket, currentRoomID]);
 
     useEffect(() => {
         if (isDirectMessage && dmRoomID) {
@@ -145,7 +118,7 @@ export default function ChatScreen({ navigation, route }) {
         // create unique room id for both people
         const generatedDmRoomId = [socket.id, targetUser.id].sort().join('_');
         socket.emit('join-dm', { dmRoomID: generatedDmRoomId, targetName: targetUser.name });
-        navigation.push('Chat', {
+        navigation.navigate('Chat', {
             isDirectMessage: true,
             dmRoomID: generatedDmRoomId,
             recipientName: targetUser.name,
@@ -157,6 +130,61 @@ export default function ChatScreen({ navigation, route }) {
     const reverseMessages = React.useMemo(() => [...messages].reverse(), [messages]);
     return (
         <View style={{ flex: 1, backgroundColor: '#f5f5f5' }}>
+            {/* --- HEADER --- */}
+            <View style={styles.customHeader}>
+                <Pressable
+                    onPress={() => {isDirectMessage ? navigation.navigate('Chat', { isDirectMessage: false}) : navigation.goBack()}}
+                    style={({ pressed }) => ({
+                        marginLeft: 0, 
+                        marginTop: 50,
+                        height: 45,
+                        width: 95,
+                        paddingHorizontal: 10, 
+                        paddingVertical: isDirectMessage ? 2 : 10,
+                        borderRadius: 20, 
+                        backgroundColor: '#007aff' + '25',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderWidth: 1,
+                        borderColor: '#007bff52'
+                    })}>
+                        <Text style={{ color: 'black', fontSize: isDirectMessage ? 15 : 20, textAlign: 'center'}}>
+                            {isDirectMessage ? "❮ Group\nChat" : "❮ Lobby"}
+                        </Text>
+                </Pressable>
+                
+                <View style={{
+                    position: 'absolute',
+                    top: 60,
+                    left: 105,
+                    right: 105,
+                    height: 45,
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                }}>
+                    <Text 
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.5}
+                        style={{ fontFamily: 'Courier', fontSize: isDirectMessage ? 20 : 28, fontWeight: 'bold' }}>
+                            {isDirectMessage ? `${recipientName}` : 'Group Chat'}
+                    </Text>
+                </View>
+
+                <Pressable 
+                    onPress={() => setIsSidebarVisible(true)}  // () => means do this only when button is pressed
+                    style={{ 
+                        marginRight: 0, 
+                        marginTop: 50,
+                        width: 95,
+                        paddingHorizontal: 10,
+                        paddingVertical: 7,
+                        borderRadius: 17, 
+                        backgroundColor: selectedColor + '25' }}>
+                    <Text style={{ color: '#000000', fontWeight: 'bold', fontSize: 14, textAlign: 'left'}}>{"☰ Direct"}{"\n"}{"Messages"}</Text>
+                </Pressable>
+            </View>
+
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 keyboardVerticalOffset={headerHeight}
@@ -339,7 +367,7 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: 20,
-        borderBottomWidth: 1,
+        borderBottomWidth: 2,
         borderBottomColor: '#eee',
         paddingBottom: 10,
     },
@@ -362,4 +390,16 @@ const styles = StyleSheet.create({
         fontSize: 16,
         flex: 1,
     },
+    customHeader: {
+        height: 110,
+        backgroundColor: '#c1bcbc54',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        width: 410,
+        borderWidth: 2,
+        borderColor: '#c1bcbce8',
+        paddingHorizontal: 10,
+        positon: 'relative'
+    }
 });

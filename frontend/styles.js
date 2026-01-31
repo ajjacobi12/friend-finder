@@ -8,7 +8,7 @@ export const styles = StyleSheet.create({
         backgroundColor: '#ffffff', // light grey background
         alignItems: 'center', // centers all the children (labels, cards) horizontally 
         justifyContent: 'flex-start', // centers everything vertically
-        paddingTop: 10, //manual centering for top portion
+        paddingTop: 0, //manual centering for top portion
         paddingHorizontal: 20, //leaves a gap of 20 units between screen edge and content
     },
     label: {
@@ -108,5 +108,15 @@ export const styles = StyleSheet.create({
         color: '#fff',               // White text on the blue button
         fontSize: 18,
         fontWeight: 'bold',
-  },
+    },
+    customHeader: {
+        height: 110,
+        backgroundColor: '#c1bcbc54',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        width: 410,
+        borderWidth: 2,
+        borderColor: '#c1bcbce8'
+    }
 });

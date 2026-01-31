@@ -83,52 +83,6 @@ export default function HomeScreen({ navigation }) {
         );
     };
 
-    // --- PROFILE AND END SESSION FOR ALL BUTTONS IN HEADER ----
-    useLayoutEffect(() => {
-        navigation.setOptions({
-        headerBackVisible: false,
-        headerStyle: {
-            backgroundColor: '#ffffff',
-            elevation: 0,
-            shadowOpacity: 0,
-            height: 125,
-        },
-        headerLeft: () => (
-            <View style={{ 
-        width: 120, // This locks the "slot" so the title can't move
-        flexDirection: 'row', 
-        justifyContent: 'flex-start',
-        marginLeft: 5 
-    }}>
-            <Pressable
-                onPress={() => navigation.navigate('Profile')}  // () => means do this only when button is pressed
-                style={({ pressed }) => ({
-                    marginLeft: 15, 
-                    paddingHorizontal: 10, 
-                    paddingVertical: 10,
-                    borderRadius: 20, 
-                    backgroundColor: '#007aff' + '25',
-                    alignContent: 'center'})}>
-            <Text style={{ color: '#007aff', fontWeight: 'bold',fontSize: 20}}>{"☰ Profile"}</Text>
-            </Pressable>
-            </View>
-        ),
-        headerRight: isHost? () => (
-            <Pressable 
-                onPress={endSessionForAll}  // () => means do this only when button is pressed
-                style={({ pressed }) => ({ 
-                    marginRight: 15, 
-                    paddingHorizontal: 10,
-                    paddingVertical: 5,
-                    borderRadius: 20, 
-                    backgroundColor: '#ff0000' + '25',
-                })}>
-            <Text style={{ color: '#ff0000', fontWeight: 'bold', fontSize: 15, textAlign: 'center'}}>{"End Session"}{"\n"}{"For All"}</Text>
-            </Pressable>
-        ) : null,
-        });
-    }, [navigation, name, selectedColor, isHost]);
-
     // "useEffect" is where "brains" of the app live, bridge between static UI and real-time world
     // "useEffect(() => {" is a hook, job is to handle things outside of normal rendering of screen 
     // (eg. starting a timer, fetching data from an API, or in this case, listening to a WebSocket)
@@ -145,6 +99,60 @@ export default function HomeScreen({ navigation }) {
     // this is where logic (variables and listeners) meet the UI in ReactNative, return must always output JSX (JavaScript XML) which looks like HTML but uses native mobile components
         <View style={styles.container}>
             <StatusBar barStyle="dark-content" />
+
+            {/* ---- CUSTOM HEADER ---- */}
+            <View style={[styles.customHeader, { alignItems: 'center' }]}>
+                {/* ---- PROFILE BUTTON ---- */}
+                <Pressable
+                    onPress={() => navigation.navigate('Profile')}  // () => means do this only when button is pressed
+                    style={({ pressed }) => ({
+                        marginLeft: 10, 
+                        marginTop: 50,
+                        height: 45,
+                        paddingHorizontal: 10, 
+                        paddingVertical: 10,
+                        borderRadius: 20, 
+                        backgroundColor: '#007aff' + '25',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderWidth: 1,
+                        borderColor: '#007bff52'
+                    })}>
+                    <Text style={{ color: '#007aff', fontWeight: 'bold', fontSize: 20}}>{"☰ Profile"}</Text>
+                </Pressable>
+                
+                <View style={{
+                    position: 'absolute',
+                    top: 60,
+                    left: 0,
+                    right: 0,
+                    height: 45,
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                }}>
+                    <Text style={{ fontFamily: 'Courier', fontSize: 30, fontWeight: 'bold', marginTop: 0 }}>Lobby</Text>
+                </View>
+
+                {/* ---- END SESSION FOR ALL BUTTON ---- */}
+                <View style={{ flex: 1, alignItems: 'flex-end'}}>
+                {isHost && (
+                <Pressable 
+                    onPress={endSessionForAll}  // () => means do this only when button is pressed
+                    style={({ pressed }) => ({ 
+                        marginRight: 10, 
+                        marginTop: 50,
+                        paddingHorizontal: 10,
+                        paddingVertical: 5,
+                        borderRadius: 20, 
+                        backgroundColor: '#ff000046',
+                        borderWidth: 1,
+                        borderColor: '#ff00005d' 
+                    })}>
+                    <Text style={{ color: '#ff0000', fontWeight: 'bold', fontSize: 15, textAlign: 'center'}}>{"End Session"}{"\n"}{"For All"}</Text>
+                </Pressable>
+                )}
+                </View>
+            </View>
         
             {/* --- CONNECTION STATUS ----- */}
             {/* <Text style={styles.label}>Status:</Text>
@@ -153,7 +161,7 @@ export default function HomeScreen({ navigation }) {
             </Text> */}
 
             {/* --- SESSION ID ---- */}
-            <View style={[styles.statusCard, {width: '40%', backgroundColor: 'white', alignItems: 'center', padding: 10, marginTop: 10}]}> 
+            <View style={[styles.statusCard, {width: '40%', backgroundColor: 'white', alignItems: 'center', padding: 10, marginTop: 20}]}> 
                 <Text style={[styles.label, {color: '#242625', fontSize: 15}]}>Session ID</Text>
                 <Text style={{ fontSize: 24, fontWeight: 'bold', color: 'black', marginTop: 10 }}>
                     {sessionId || "None"}
@@ -161,7 +169,7 @@ export default function HomeScreen({ navigation }) {
             </View>
         
             {/* --- USER LIST ----- */}
-            <View style={[styles.userCard, {paddingVertical: 10}]}>
+            <View style={[styles.userCard, {paddingVertical: 0}]}>
                 {/* --- MY USERNAME AND COLOR ---- */}
                 <View style={[styles.friendBadge, 
                     { 
@@ -186,7 +194,7 @@ export default function HomeScreen({ navigation }) {
                 </View>
                     
                 {/* --- DIVIDER ---- */}
-                <Text style={{ fontSize: 14, color: 'grey', marginTop: 8, marginLeft: 5, marginBottom: 2 }}>
+                <Text style={{ fontSize: 14, color: 'grey', marginTop: 20, marginLeft: 5, marginBottom: 2 }}>
                     PEOPLE NEARBY ({friends.length})
                 </Text>
 
@@ -262,7 +270,7 @@ export default function HomeScreen({ navigation }) {
 
                 {/* chat */}
                 <TouchableOpacity
-                    onPress={() => navigation.navigate('Chat')}
+                    onPress={() => navigation.navigate('Chat', { isDirectMessage: false })}
                     style={[styles.friendBadge, {backgroundColor: '#d6d331', padding: 15, marginTop: 10}]}>
                     <Text style={{color: 'white', textAlign: 'center', fontWeight: 'bold'}}>💬 Open Chat</Text>
                 </TouchableOpacity>

@@ -146,6 +146,13 @@ export const UserProvider = ({ children }) => {
         return () => clearInterval(interval);
     }, []);
 
+    // keep ref in sync with state, don't need the other useEffect to run every time
+    // a new session is created where isHost -> true for creator
+    const isHostRef = useRef(isHost);
+    useEffect(() => {
+        isHostRef.current = isHost;
+    }, [isHost]);
+
     // if socket changes (app starts up): 
     // if connecting set connection status to true
     // if disconnecting/connection drops then start cleanup
@@ -194,7 +201,7 @@ export const UserProvider = ({ children }) => {
         });
 
         socket.on('session-ended', () => {
-            if (!isHost)    {
+            if (!isHostRef.current)    {
                 Alert.alert("The host has ended the session.");
             }
             handleCleanExit();
@@ -246,9 +253,9 @@ export const UserProvider = ({ children }) => {
 
         listenersAttached.current = true;
         
-        // cleanup -- stop listening if app closes
+        // cleanup 
         return () => {
-            console.log("App refreshing or unmounting. Disconnecting socket...");
+            console.log("App refreshing or unmounting. Refreshing socket listeners...");
             socket.off('connect');
             socket.off('disconnect');
             socket.off('user-update');
@@ -261,7 +268,7 @@ export const UserProvider = ({ children }) => {
             isConnectingRef.current = false;
             listenersAttached.current = false;
         };
-    }, [showNotification, handleCleanExit, isHost]); // empy to ensure it only runs once on mount
+    }, [showNotification, handleCleanExit]); // empy to ensure it only runs once on mount
 
     return (
         <UserContext.Provider value={{
