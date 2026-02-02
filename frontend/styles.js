@@ -9,15 +9,14 @@ export const styles = StyleSheet.create({
         alignItems: 'center', // centers all the children (labels, cards) horizontally 
         justifyContent: 'flex-start', // centers everything vertically
         paddingTop: 0, //manual centering for top portion
-        paddingHorizontal: 20, //leaves a gap of 20 units between screen edge and content
     },
-    label: {
-        fontSize: 12, // small text
-        color: '#8e8e93',
-        textTransform: 'uppercase', // automatically capitalizes every letter
-        letterSpacing: 1 // adds a bit of space between each letter to make uppercase text easier to read
+    contentWrapper: {
+        paddingHorizontal: 20, // Move the padding here
+        alignItems: 'center',
+        width: '100%',
+        flex: 1,
     },
-    statusCard: {
+    card: {
         backgroundColor: '#ffffff', // pure white
         padding: 25, // space inside the box so text isn't touching box edges
         borderRadius: 20, // rounded corners
@@ -30,47 +29,24 @@ export const styles = StyleSheet.create({
         elevation: 5, // Android shadow
         marginBottom: 20
     },
-    cardTitle: {
-        fontSize: 14,
-        color: '#3a3a3c',
-        marginBottom: 8
-    },
-    statusText: {
-        fontSize: 22, // large text
-        fontWeight: 'bold', // thick font
-        color: '#1c1c1e', // off-black, easier on the eyes than #000000
-        marginBottom: 40 // creates a large 40 unit gap underneath the status
-    },
-    userCard: {
-        backgroundColor: '#ffffff',
-        padding: 25,
-        borderRadius: 20,
-        width: '100%',
-    },
-    box: {
+    inputWrapper: {
         backgroundColor: 'lightgrey',
         padding: 15,
         borderRadius: 20,
         width: '60%',
-        marginTop: 15
-    },
-    messageText: {
-        fontSize: 20,
-        color: '#007aff', // ios blue
-        fontWeight: '600' // semi-bold
-    },
-    IDText: {
-        fontSize: 12,
-        color: '#8e8e93',
-        marginTop: 10,
-        fontFamily: 'Courier'
+        marginTop: 15,
+        height: 50
     },
     friendBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        height: 50,
+        justifyContent: 'space-between',
         backgroundColor: '#f0f0f5',
         paddingVertical: 10,
         paddingHorizontal: 15,
         borderRadius: 12,
-        marginTop: 10,
+        marginTop: 0,
         borderWidth: 1,
         borderColor: '#e5e5ea'
     },
@@ -78,10 +54,6 @@ export const styles = StyleSheet.create({
         fontSize: 15,
         color: '#3a3a3c',
         fontFamily: 'Courier'
-    },
-    input: {
-        fontSize: 20,
-        color: 'black',
     },
     colorContainer: {
         flexDirection: 'row',        // Lays circles out in a horizontal line
@@ -111,12 +83,159 @@ export const styles = StyleSheet.create({
     },
     customHeader: {
         height: 110,
-        backgroundColor: '#c1bcbc54',
+        backgroundColor: '#ffffff',
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        width: '100%',
+        borderColor: '#c1bcbce8',
+        paddingHorizontal: 15,
+        paddingBottom: 0,
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 10,
+    },
+    absoluteHeaderTitle: {
+        position: 'absolute',
+        top: 60,
+        left: 0,
+        right: 0,
+        height: 45,
+        alignItems: 'center',
+        justifyContent: 'center'
+    },
+    headerButton: {
+        marginTop: 50, // Matches your layout
+        height: 45,
+        paddingHorizontal: 12,
+        borderRadius: 15,
+        borderWidth: 1,
+        justifyContent: 'center',
+        minWidth: 80, // Ensures it doesn't get too tiny
+    },
+    headerButtonText: {
+        color: 'black',
+        fontSize: 13,
+        fontWeight: 'bold',
+        lineHeight: 15, // Helps with the \n layout
+    },
+    headerTitleText: {
+        fontFamily: 'Courier',
+        fontWeight: 'bold',
+    },
+    
+    // chat specific styles
+    messageBubble: {
+        padding: 10,
+        borderRadius: 10,
+        maxWidth: '80%',
+        marginBottom: 10
+    },
+    myMessage: {
+        backgroundColor: '#007aff' + '20',
+        alignSelf: 'flex-end',
+        borderBottomRightRadius: 0,
+    },
+    theirMessage: {
+        backgroundColor: '#e5e5ea',
+        alignSelf: 'flex-start',
+        borderBottomLeftRadius: 0,
+    },
+    messageInputContainer: {
+        flexDirection: 'row',
+        paddingVertical: 10,
+        paddingHorizontal: 10,
+        backgroundColor: 'white',
+        alignItems: 'center',
+        borderTopWidth: 1,
+        borderTopColor: '#eee',
+    },
+    messageInput: {
+        flex: 1,
+        height: 40,
+        borderColor: '#ddd',
+        borderWidth: 1,
+        borderRadius: 20,
+        paddingHorizontal: 15,
+        marginRight: 10,
+        backgroundColor: '#fff',
+        height: 45,
+        fontSize: 18
+    },
+    sendButton: {
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 15,
+        paddingVertical: 10,
+        height: 40,
+        backgroundColor: '#007aff',
+        borderRadius: 20,
+    },
+    sidebarContainer: {
+        backgroundColor: '#ffffff',
+        width: '80%',
+        height: '100%',
+        alignSelf: 'flex-end', // Pushes sidebar to the right
+        paddingTop: 50,
+        paddingHorizontal: 20,
+        backfaceVisibility: 'hidden',
+        shadowColor: '#000',
+        shadowOffset: { width: -5, height: 0 },
+        shadowOpacity: 0.1,
+        shadowRadius: 5,
+        elevation: 5,
+    },
+    sidebarHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 20,
+        borderBottomWidth: 2,
+        borderBottomColor: '#eee',
+        paddingBottom: 10,
+    },
+    sidebarTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+    },
+    userItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        width: 410,
-        borderWidth: 2,
-        borderColor: '#c1bcbce8'
+        paddingVertical: 12,
+    },
+    userDot: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        marginRight: 10,
+    },
+    userName: {
+        fontSize: 16,
+        flex: 1,
+    },
+    // notifications
+    notificationBar: {
+        position: 'absolute',
+        top: 10, // Below the notch/status bar
+        left: 10,
+        right: 10,
+        backgroundColor: '#333',
+        padding: 15,
+        borderRadius: 10,
+        elevation: 10, // Shadow for Android
+        shadowColor: '#000', // Shadow for iOS
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        zIndex: 9999,
+    },
+    notificationTitle: { 
+        color: '#fff', 
+        fontWeight: 'bold',
+        textTransform: 'uppercase',
+    },
+    notificationText: { 
+        color: '#ccc', 
+        fontSize: 12 
     }
 });

@@ -3,13 +3,12 @@ import React, { useState, useLayoutEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StatusBar, Animated, Dimensions, Platform, Keyboard, TouchableWithoutFeedback, PanResponder } from 'react-native';
 import { styles } from '../styles';
 import { useUser } from '../UserContext';
-import { KeyboardAvoidingView } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
 
 export default function LoginScreen( { navigation }) {
-    const { setSessionId, secureEmit, setSessionUsers, isConnected, setIsHost, justCreatedSession } = useUser();
+    const { setSessionId, secureEmit, setSessionUsers, setName, setSelectedColor, setHasRegistered, isConnected, setIsHost, justCreatedSession, userUUID, setUserUUID } = useUser();
     const [tempCode, setTempCode] = useState(''); // tempCode holds what user is typing into textInput before hitting "join"
     const [errorMsg, setErrorMsg]  = useState('');
     const [isJoinScreen, setIsJoinScreen] = useState(false);
@@ -21,6 +20,9 @@ export default function LoginScreen( { navigation }) {
         PanResponder.create({
             onStartShouldSetPanResponderCapture: () => false, // capture touch immediately
             onStartShouldSetPanResponder: () => isJoinScreen,
+            onPanResponderGrant: () => {
+                Keyboard.dismiss();
+            },
             onMoveShouldSetPanResponder: (event, gestureState) => {
                 // only capture if on screen 2 (slideAnim at -width)
                 // and if user swipes right dx > 10, ensure vertical movement is also small
@@ -56,12 +58,15 @@ export default function LoginScreen( { navigation }) {
         // generate random 6 character key
         const newId = Math.random().toString(36).substring(2, 8).toUpperCase();
         // tell server to create and track this room
-        secureEmit('create-session', newId, () => {
+        secureEmit('create-session', { roomID: newId, existingUUID: userUUID }, (response) => {
             setLoading(false);
             // update global context
-            setSessionId(newId);
-            setIsHost(true);
-            navigation.navigate('Profile'); // move to profile setup
+            if (response && response.userUUID) {
+                setUserUUID(response.userUUID);
+                setSessionId(newId);
+                setIsHost(true);
+                navigation.navigate('Profile'); // move to profile setup
+            }
         });
     };
 
@@ -78,19 +83,32 @@ export default function LoginScreen( { navigation }) {
             console.log("Sending join request for session:", code);
 
             // ask the server "is this a real session?"
-            secureEmit('join-session', code, (response) => {
+            secureEmit('join-session', { roomID: code, existingUUID: userUUID }, (response) => {
                 setLoading(false);
                 console.log("Server response for joining session:", response);
 
                 if (response && response.exists && !response.full) {           
-                    setErrorMsg("");         
+                    setErrorMsg("");    
+                    // update core session details     
+                    setUserUUID(response.userUUID);
+                    setSessionId(code);
+                    setIsHost(response.isHost || false);
+
                     if (response.currentUsers) {
                         setSessionUsers(response.currentUsers);
                     }
-                    setSessionId(code);
-                    setIsHost(false);
-                    console.log("Navigating to profile...");
-                    navigation.navigate('Profile');
+
+                    // redirect logic
+                    if (response.alreadyRegistered && response.userData) {
+                        console.log("Re-entry detected. Restoring profile...");
+                        // synce data with stuff from server
+                        setName(response.userData.name);
+                        setSelectedColor(response.userData.color);
+                        setHasRegistered(true);
+                    } else {
+                        console.log("New user or unregistered. Navigating to profile...");
+                        navigation.navigate('Profile');
+                    }
                 } else if (response && response.exists && response.full) {
                     setErrorMsg("Session is full!");
                     setTimeout(() => {setErrorMsg("")}, 5000);
@@ -117,6 +135,7 @@ export default function LoginScreen( { navigation }) {
     };
 
     const hideJoinInput = () => {
+        Keyboard.dismiss();
         setIsJoinScreen(false);
         setTempCode(""); // clears input when going back
         setErrorMsg("");
@@ -144,10 +163,6 @@ export default function LoginScreen( { navigation }) {
         <View style={{ flex: 1, backgroundColor: '#ffffff', overflow: 'hidden' }} {...panResponder.panHandlers}>
             <StatusBar barStyle="dark-content" />
 
-            <KeyboardAvoidingView   
-                behavior={Platform.OS === "ios" ? "padding" : "height"}
-                style={{ flex: 1 }}
-            > 
             <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
             <View style={{ flex: 1, alignItems: 'flex-start', justifyContent: 'center', width: width }}>
 
@@ -184,65 +199,77 @@ export default function LoginScreen( { navigation }) {
                 </View>
                    
                 {/* ---- SCREEN 2: JOIN INPUT (RIGHT) ---- */}
-                <View style={{ width: width, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20, marginTop: 50 }}>
-
+                <View style={{ width: width, flex: 1 }}>
+                    <View style={styles.customHeader, { position: 'absolute', top: 50 }}>
                     {/* back button */}
-                    <TouchableOpacity 
-                        onPress={hideJoinInput}
-                        style={{ position: 'absolute', top: 0, left: 20, padding: 10}}
-                    >
-                        <Text style={{ color: '#007aff', fontSize: 20, fontWeight: 'bold' }}>Back</Text>
-                    </TouchableOpacity>
+                        <TouchableOpacity 
+                            onPress={hideJoinInput}
+                            style={{ position: 'absolute', top: 0, left: 20, padding: 10}}
+                        >
+                            <Text style={{ color: '#007aff', fontSize: 20, fontWeight: 'bold' }}>Back</Text>
+                        </TouchableOpacity>
+                    </View>
 
-                    {/* error message display */}
-                    {errorMsg !== "" && (
-                        <Text style={{ color: 'red', fontWeight: 'bold', marginBottom: 10, fontSize: 16 }}>
-                            {errorMsg}
-                        </Text>
-                    )}
+                    <View style={[styles.contentWrapper, { flex: 1, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 270 }]}>
+                        {/* error message display */}
+                        {errorMsg !== "" && (
+                            <Text style={{ color: 'red', fontWeight: 'bold', marginBottom: 10, fontSize: 16 }}>
+                                {errorMsg}
+                            </Text>
+                        )}
 
-                    {/* input box */}
-                    <TextInput
-                        style={[styles.input,{
-                            height: 100,
-                            backgroundColor: 'lightgrey',
-                            borderRadius: 20,
-                            width: '75%',
-                            paddingHorizontal: 25,
-                            fontSize: 30,
-                            textAlign: 'center'
-                        }]}
-                        placeholder="Enter Session ID..."
-                        placeholderTextColor="#838181"
-                        onChangeText={setTempCode}
-                        value={tempCode}
-                        autoCapitalize="characters"
-                        autoCorrect={false}
-                        returnKeyType="done"
-                    />
+                        {/* input box */}
+                        <TextInput
+                            style={{
+                                height: 75,
+                                backgroundColor: 'lightgrey',
+                                borderRadius: 20,
+                                width: 300,
+                                paddingHorizontal: 25,
+                                fontSize: 30,
+                                color: 'black',
+                                textAlign: 'center'
+                            }}
+                            placeholder="Enter Session ID..."
+                            placeholderTextColor="#838181"
+                            onChangeText={setTempCode}
+                            value={tempCode}
+                            autoCapitalize="characters"
+                            autoCorrect={false}
+                            returnKeyType="done"
+                        />
 
-                    {/* submit button */}
-                    <TouchableOpacity 
-                        style={[styles.button, {
-                            backgroundColor: '#28a745',
-                            marginTop: 20,
-                            width: '50%',
-                            height: 80,
-                            justifyContent: 'center',
-                            opacity: loading ? 0.6 : 1
-                        }]} 
-                        disabled={loading}
-                        onPress={joinSession}
-                    >
-                        <Text style={[styles.buttonText, { fontSize: 30 }]}>
-                            {loading ? "Joining..." : "Submit"}
-                        </Text>
-                    </TouchableOpacity>
+                        {/* submit button */}
+                        <TouchableOpacity 
+                            style={[styles.button, {
+                                backgroundColor: '#28a745',
+                                marginTop: 20,
+                                width: '50%',
+                                height: 80,
+                                justifyContent: 'center',
+                                opacity: loading ? 0.6 : 1,
+                                paddingHorizontal: 20,
+                                paddingVertical: 0
+                            }]} 
+                            disabled={loading}
+                            onPress={joinSession}
+                        >
+                            <View style={{ height: 60, justifyContent: 'center', alignItems: 'center' }}>
+                                <Text style={[styles.buttonText, { 
+                                    fontSize: loading ? 32 : 40, 
+                                    lineHeight: 45, 
+                                    textAlignVertical: 'center', 
+                                    includeFontPadding: false 
+                                    }]}>
+                                    {loading ? "Joining..." : "Submit"}
+                                </Text>
+                            </View>
+                        </TouchableOpacity>
+                    </View>
                 </View>
             </Animated.View>
         </View>
         </TouchableWithoutFeedback>
-        </KeyboardAvoidingView>
     </View>
     );
 }

@@ -191,40 +191,49 @@
         document.getElementById('chatArea').innerHTML = ''; 
     }
 
-function sendChat() {
+    function sendChat() {
         const input = document.getElementById('chatInput');
         const text = input.value.trim();
         const myName = document.getElementById('nameInput').value;
         if (!text) return;
 
+        // --- GENERATE UNIQUE ID HERE ---
+        // Using a fallback for older browsers just in case
+        const uniqueId = window.crypto.randomUUID ? window.crypto.randomUUID() : 
+                        (Date.now().toString(36) + Math.random().toString(36).substr(2));
+
+        const messageData = {
+            id: uniqueId, // <--- Attach the UUID
+            sender: myName,
+            context: { text },
+            color: '#1e8fff',
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            senderId: socket.id
+        };
+
         if (activeDM) {
             // 1. Send to server
             socket.emit('send-direct-message', {
+                ...messageData, // Includes our new ID
                 recipientId: activeDM.id,
-                context: { text },
                 fromName: myName
             });
 
-            // 2. FIX: Display the message on your own screen immediately!
-            displayMessage({ 
-                sender: myName, 
-                color: '#1e8fff', 
-                context: { text },
-                id: socket.id // Identify as me
-            }, true, true);
+            // 2. Display on own screen
+            displayMessage(messageData, true, true);
 
         } else {
             // Group Chat logic
             socket.emit('send-message', {
+                ...messageData, // Includes our new ID
                 roomID: myCurrentRoom,
-                context: { text },
-                sender: myName
             });
-            displayMessage({ sender: myName, color: '#1e8fff', context: { text } }, true, false);
+            
+            displayMessage(messageData, true, false);
         }
         input.value = '';
     }
-
+    
     // MATCHES SERVER: {roomID, newHostId}
     function transferHost(targetId) {
         if(confirm("Promote this user to host?")) {
@@ -243,19 +252,26 @@ function sendChat() {
         const chatArea = document.getElementById('chatArea');
         const div = document.createElement('div');
         
-        // Check if message is mine using data.id (server) or data.sender (group)
-        const amISender = isMe || (data.id === socket.id);
+        // 1. IMPROVED LOGIC: 
+        // If isMe is passed, use it. Otherwise, check if the senderId matches ours.
+        const amISender = isMe || (data.senderId === socket.id);
         
         div.className = `msg ${amISender ? 'my-msg' : 'their-msg'} ${isDM ? 'dm-msg' : ''}`;
         
-        // Get text safely
+        // 2. Add a unique attribute to the div (useful for debugging)
+        if (data.id) div.setAttribute('data-msg-id', data.id);
+        
         const text = data.context ? data.context.text : '...';
+        
+        // 3. CLEANER HTML:
+        // We don't usually show our own name on our own bubbles in chat apps.
+        const senderName = amISender ? "You" : data.sender;
         
         div.innerHTML = `
             <span class="msg-header" style="color:${data.color || '#000'}">
-                ${isDM ? '🔒 ' : ''}${data.sender}
+                ${isDM ? '🔒 ' : ''}${senderName}
             </span>
-            ${text}
+            <div class="msg-text">${text}</div>
         `;
         
         chatArea.appendChild(div);
