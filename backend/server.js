@@ -12,6 +12,7 @@ const io = require('socket.io')(http, {
     pingTimeout: 2000, // wait 2 seconds before declaring "dead"
     pingInterval: 5000 // send a ping every 5 seconds
 }); // imports socket.io (tool for real-time, two-way communication), and attaches it to "http" server
+const crypto = require('crypto');
 
 // 2. set up the "static folder"
 app.use(express.static('public')); // tells Express, "if anyoneasks for a file (eg. image, CSS file, or html page), look inside a folder named public". This is howto "serve" the frontend code to the user's browser
@@ -44,17 +45,32 @@ const handleUserJoiningRoom = (socket, roomID, existingUUID = null) => {
     cancelRoomDeletion(roomID);
     // identity handshake: use old ID or create a new one, link current socket connection to this permanent UUID
     const userUUID = existingUUID || crypto.randomUUID();
+
+    // force purge: look for any record already using this UUID
+    // if it exists, kill the old socket mapping before continuing
+    if (activeUsers[userUUID]) {
+        const oldSocketId = activeUsers[userUUID].socketId;
+        if (oldSocketId !== socket.id) {
+            console.log(`[GHOST BUSTER] Removing old socket ${oldSocketId} for UUID ${userUUID}`);
+            delete socketToUUID[oldSocketId];
+            const oldSocket = io.sockets.sockets.get(oldSocketId);
+            if (oldSocket) oldSocket.leave(roomID);
+        }
+    }
+
+    // update mappings
     socketToUUID[socket.id] = userUUID;
 
     // check to see if the session already has a host
-    const hasHost = Object.values(activeUsers).some(u => u.sessionId === roomID && u.isHost);
+    const hasHost = Object.values(activeUsers).some(u => u.sessionId === roomID && u.isHost && u.id !== userUUID);
 
+    // reconnecting logic
     const isReconnecting = !!activeUsers[userUUID];
     if (isReconnecting) {
         // if a reconnection, update the new socket line
         activeUsers[userUUID].socketId = socket.id;
         activeUsers[userUUID].sessionId = roomID;
-        if (!hasHost) activeUsers[userUUID].isHost = true;
+        activeUsers[userUUID].isHost = !hasHost;
     } else {
         // if not reconnecting and is a new user, create profile
         activeUsers[userUUID] = {
@@ -89,10 +105,10 @@ const handleUserJoiningRoom = (socket, roomID, existingUUID = null) => {
 const handleRoomCleanup = (roomID) => {
     if (!roomID) return;
 
-    const room = io.sockets.adapter.rooms.get(roomID);
-    const numClients = room ? room.size : 0;
+    const usersInRoom = Object.values(activeUsers).filter(u => u.sessionId === roomID);
+    const numUsers = usersInRoom.length;
     
-    if (numClients <= 0) {
+    if (numUsers <= 0) {
         console.log(`Room ${roomID} is empty. Starting 5-minute deletion timer...`);
         if (roomTimeoutRefs[roomID]) clearTimeout(roomTimeoutRefs[roomID]);
 
@@ -134,6 +150,17 @@ const ensureHostExists = (roomID, leavingUUID) => {
     };
 };
 
+// sanitize any text/name
+const sanitize = (text) => {
+    if (typeof text !== 'string') return '';
+    return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+};
+
 // 3. handle live connections
 io.on('connection', (socket) => { // an event listener -- waits for user to open the app, and when opened, it triggers a function that gives that specific user a unique "socket" object (their personal "phone line" to the server)
     // io.on('..', (ALWAYS gives socket/ID number))
@@ -141,8 +168,10 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
     console.log(`New user connected: ${socket.id}`);
  
     // ---- CREATE SESSION -----
-    socket.on('create-session', (roomID, callback) => {
-        const userUUID = handleUserJoiningRoom(socket, roomID, null);
+    socket.on('create-session', (data, callback) => {
+        const roomID = data.roomID;
+        const existingUUID = data.existingUUID || null;
+        const userUUID = handleUserJoiningRoom(socket, roomID, existingUUID);
         console.log(`Session Created: ${roomID}`);
 
         if (typeof callback == 'function') {
@@ -175,7 +204,7 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
                 const userUUID = handleUserJoiningRoom(socket, roomID, existingUUID);
                 // get user's data to see if they were already registered
                 const userData = activeUsers[userUUID];
-                const alreadyRegistered = !!(userData && userData.name && userData.name !== "");
+                const alreadyRegistered = !!(userData && userData.color !== '#cccccc' && userData.name !== "New User");
                 // refresh current user list
                 const currentUsers = Object.values(activeUsers).filter(u => u.sessionId === roomID);
                 if (typeof callback == 'function') {
@@ -220,15 +249,16 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
             return;
         }
 
+        const cleanName = sanitize(profile.name || "Anonymous");
         // update profile while preserving critical server-side data
         activeUsers[userUUID] = { 
             ...activeUsers[userUUID], 
-            name: profile.name, 
+            name: cleanName, 
             color: profile.color 
         };
 
         if (typeof callback === 'function') {
-            callback({ success: true });
+            callback({ success: true, uuid: userUUID });
         }
 
         // broadcast refreshed list to everyone in that session
@@ -239,10 +269,11 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
     socket.on('leave-session', (roomID) => {
         const uuid = socketToUUID[socket.id];
         const user = activeUsers[uuid];
+        const userName = user.name || "Unknown User";
+
+        broadcastUpdate(roomID, `User ${userName} left room ${roomID}`);
 
         if (!user) return; // if user is gone from records, do nothing
-
-        const userName = user.name || "Unknown User";
 
         // if user was the host, pick a new one
         if (user.isHost === true) {
@@ -257,8 +288,6 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
         socket.leave(roomID);
         socket.leave(uuid);
         
-        broadcastUpdate(roomID, `User ${userName} left room ${roomID}`);
-
         // check if room is now empty
         setTimeout(() => {
             handleRoomCleanup(roomID);
@@ -382,13 +411,17 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
     });
 
     // --- TRANSFER HOST STATUS ----
-    socket.on('transfer-host', ( {roomID, newHostUUID} ) => {
+    socket.on('transfer-host', ( {roomID, newHostUUID}, callback ) => {
         const senderUUID = socketToUUID[socket.id];
         const sender = activeUsers[senderUUID];
+
+        // console.log("Incoming transfer-host request:", { roomID, newHostUUID, senderUUID, sender });
+        // console.log("Current activeUsers state:", JSON.stringify(activeUsers, null, 2));
         
         // only host can transfer power
         if (!sender || !sender.isHost ) {
             console.log(`Unauthorized transfer attempt by ${sender?.name || socket.id}`);
+            if (callback) callback({ success: false });
             return;
         }
 
@@ -396,6 +429,7 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
         const targetUser = activeUsers[newHostUUID];
         if (!targetUser || targetUser.sessionId !== roomID) {
             console.log(`Transfer failed: target user ${newHostUUID} not found in room.`);
+            if (callback) callback({ success: false });
             return;
         }
 
@@ -405,6 +439,7 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
 
         io.to(roomID).emit('host-change', newHostUUID);
         broadcastUpdate(roomID, `${targetUser.name} is now the host.`);
+        if (callback) callback({ success: true });
     });
 
     // --- MESSAGING ----
@@ -427,23 +462,30 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
     socket.on('send-message', (messageData) => {
         const uuid = socketToUUID[socket.id];
         const sender = activeUsers[uuid];
+        // console.log("data being sent: ", messageData);
 
         // validate the message, don't process empty data
         if (!sender || !messageData.context?.text?.trim() ) return;
+
+        const sanitizedContext = {
+            ...messageData.context,
+            text: sanitize(messageData.context.text)
+        };
 
         // reconstruct package, don't just send 'messagData', only emit what's necessary
         const outboundData = formatOutboundMessage(
             sender, 
             messageData.roomID, 
-            messageData.context, 
+            sanitizedContext, 
             false, 
-            crypto.randomUUID(),
+            messageData.id,
             uuid
         );
 
-        // broadcast to everyone in room except sender
-        socket.to(messageData.roomID).emit('receive-message', outboundData);
+        // broadcast to everyone in room
+        io.to(messageData.roomID).emit('receive-message', outboundData);
         console.log(`[CHAT] Room ${messageData.roomID} | ${sender.name}: ${outboundData.context.text}`);
+        // console.log("data being sent to receive-message: ", outboundData);
     });
 
     socket.on('send-direct-message', (messageData) => {
@@ -451,32 +493,39 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
         const sender = activeUsers[uuid];
         const { recipientUUID, context } = messageData;
 
-        if (!sender || !context?.text?.trim() || !recipientUUID) return;
+        if (!sender || !context?.text?.trim() || !recipientUUID || !activeUsers[recipientUUID]) return;
+
+        const sanitizedContext = {
+            ...messageData.context,
+            text: sanitize(messageData.context.text)
+        };
         
         const dmRoomID = [uuid, recipientUUID].sort().join('_');
         const outboundData = formatOutboundMessage(
             sender, 
             dmRoomID, 
-            context, 
+            sanitizedContext, 
             true, 
-            crypto.randomUUID(),
+            messageData.id,
             uuid
         );
 
         io.to(recipientUUID).emit('receive-message', outboundData);
+        socket.emit('receive-message', outboundData);
         console.log(`DM from ${sender.name} to ${recipientUUID}: ${context.text}`);
     });
 
-    socket.on('join-dm', ( {dmRoomID, targetName} ) => {
-        const uuid = socketToUUID[socket.id];
+    socket.on('join-dm', ( {dmRoomID } ) => {
+        // don't need to broadcast anything, just silently join room so socket receives 'user-typing'
+        // for this DM
         socket.join(dmRoomID);
-        console.log(`User ${uuid} is joining DM room: ${dmRoomID} with ${targetName}`);
     });
 
     socket.on('typing', (data) => {
         const uuid = socketToUUID[socket.id];
         if (!uuid) return;
 
+        // data.roomID is either sessionId or dmRoomID
         socket.to(data.roomID).emit('user-typing', {
             roomID: data.roomID,
             name: data.name,
@@ -489,6 +538,7 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
         if (!uuid) return;
 
         socket.to(data.roomID).emit('user-stop-typing', {
+            roomID: data.roomID,
             id: uuid
         });
     });

@@ -1,6 +1,6 @@
 // ----- IMPORTS -------
 import React, { useState, useLayoutEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StatusBar, Animated, Dimensions, Platform, Keyboard, TouchableWithoutFeedback, PanResponder } from 'react-native';
+import { View, Text, TextInput, StatusBar, Pressable, Animated, Dimensions, Platform, Keyboard, TouchableWithoutFeedback, PanResponder } from 'react-native';
 import { styles } from '../styles';
 import { useUser } from '../UserContext';
 
@@ -85,7 +85,7 @@ export default function LoginScreen( { navigation }) {
             // ask the server "is this a real session?"
             secureEmit('join-session', { roomID: code, existingUUID: userUUID }, (response) => {
                 setLoading(false);
-                console.log("Server response for joining session:", response);
+                // console.log("Server response for joining session:", response);
 
                 if (response && response.exists && !response.full) {           
                     setErrorMsg("");    
@@ -99,7 +99,7 @@ export default function LoginScreen( { navigation }) {
                     }
 
                     // redirect logic
-                    if (response.alreadyRegistered && response.userData) {
+                    if (response.alreadyRegistered) {
                         console.log("Re-entry detected. Restoring profile...");
                         // synce data with stuff from server
                         setName(response.userData.name);
@@ -176,7 +176,7 @@ export default function LoginScreen( { navigation }) {
                 {/* ---- SCREEN 1: MAIN MENU (LEFT) ----- */}
                 <View style={{ width: width, alignItems: 'center', justifyContent: 'center',paddingHorizontal: 20 }}>
                     {/* new session button */}
-                    <TouchableOpacity 
+                    <Pressable 
                         style={[styles.button, { width: '100%', height: 100, justifyContent: 'center', paddingHorizontal: 25}]} 
                         onPress={startNewSession}
                         disabled={loading}
@@ -184,30 +184,30 @@ export default function LoginScreen( { navigation }) {
                         <Text style={[styles.buttonText, {fontSize: 40, textAlign: 'center' }]}>
                             {loading ? "Creating..." : "New Session"}
                         </Text>
-                    </TouchableOpacity>
+                    </Pressable>
 
                     <View style={{ marginVertical: 40, backgroundColor: '#ccc', height: 2, width: '80%' }} />
 
                     {/* join session button */}
-                    <TouchableOpacity 
+                    <Pressable 
                         style={[styles.button, { backgroundColor: '#77e1ede4', marginTop: 0, width: '100%', height: 100, justifyContent: 'center'}]} 
                         onPress={showJoinInput}
                         disabled={loading}
                     >
                         <Text style={[styles.buttonText, {fontSize: 40}]}>Join Session</Text>
-                    </TouchableOpacity>
+                    </Pressable>
                 </View>
                    
                 {/* ---- SCREEN 2: JOIN INPUT (RIGHT) ---- */}
                 <View style={{ width: width, flex: 1 }}>
                     <View style={styles.customHeader, { position: 'absolute', top: 50 }}>
                     {/* back button */}
-                        <TouchableOpacity 
+                        <Pressable 
                             onPress={hideJoinInput}
                             style={{ position: 'absolute', top: 0, left: 20, padding: 10}}
                         >
                             <Text style={{ color: '#007aff', fontSize: 20, fontWeight: 'bold' }}>Back</Text>
-                        </TouchableOpacity>
+                        </Pressable>
                     </View>
 
                     <View style={[styles.contentWrapper, { flex: 1, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 270 }]}>
@@ -240,7 +240,7 @@ export default function LoginScreen( { navigation }) {
                         />
 
                         {/* submit button */}
-                        <TouchableOpacity 
+                        <Pressable 
                             style={[styles.button, {
                                 backgroundColor: '#28a745',
                                 marginTop: 20,
@@ -264,7 +264,7 @@ export default function LoginScreen( { navigation }) {
                                     {loading ? "Joining..." : "Submit"}
                                 </Text>
                             </View>
-                        </TouchableOpacity>
+                        </Pressable>
                     </View>
                 </View>
             </Animated.View>

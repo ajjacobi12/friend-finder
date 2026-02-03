@@ -21,16 +21,20 @@ export const UserProvider = ({ children }) => {
     const [isConnected, setIsConnected] = useState(socket.connected);
     const [sessionId, setSessionId] = useState(null);
     const [sessionUsers, setSessionUsers] = useState([]);
+    const [friends, setFriends] = useState([]);
     const [isHost, setIsHost] = useState(false);
     const [notification, setNotification] = useState(null);
     const [allMessages, setAllMessages] = useState({});
     const [userUUID, setUserUUID] = useState(null);
+    const [unreadRooms, setUnreadRooms] = useState([]);
+    const [currentActiveRoom, setCurrentActiveRoom] = useState(null);
 
     const slideAnim = useRef(new Animated.Value(-100)).current;
     const hideTimeout = useRef(null);
     const reconnectTimeoutRef = useRef(null);
     const isConnectingRef = useRef(false);
     const justCreatedSession = useRef(false);
+    const activeRoomRef = useRef(currentActiveRoom);
 
     const sessionIdRef = useRef(sessionId);
     const isHostRef = useRef(isHost);
@@ -38,6 +42,7 @@ export const UserProvider = ({ children }) => {
     // keep a ref to the latest sessionId for cleanup on disconnect
     useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
     useEffect(() => { isHostRef.current = isHost; }, [isHost]);
+    useEffect(() => { activeRoomRef.current = currentActiveRoom; }, [currentActiveRoom]);
 
     // --- CLEANUP FUNCTION ----
     const handleCleanExit = useCallback(() => {
@@ -48,7 +53,8 @@ export const UserProvider = ({ children }) => {
         }
         setSessionId(null);
         setSessionUsers([]);
-        setSelectedColor("#a0220c");
+        setFriends([]);
+        setSelectedColor('#cccccc');
         setIsHost(false);
         setHasRegistered(false);
     }, []);
@@ -80,7 +86,7 @@ export const UserProvider = ({ children }) => {
 
     // --- SHOW NOTIFICATION FUNCTION ---
     const showNotification = useCallback((data) => {
-        console.log("notification triggered", data);
+        // console.log("notification triggered", data);
         // clear any existing timer
         if (hideTimeout.current) clearTimeout(hideTimeout.current);
 
@@ -133,6 +139,13 @@ export const UserProvider = ({ children }) => {
         })
     ).current;
 
+    // --- UNREAD MESSAGES ---
+    // function called from chat.js when entering a room
+    const markAsRead = useCallback((roomID) => {
+        setCurrentActiveRoom(roomID);
+        setUnreadRooms(prev => prev.filter(id => id !== roomID));
+    }, []);
+
     // --- VOLUNTARILY LEAVING A SESSION ---
     const onLeave = () => {
         if (isHost && friends.length > 1) {
@@ -150,7 +163,7 @@ export const UserProvider = ({ children }) => {
                  { text: "Yes", onPress: () => {
                         secureEmit('transfer-host', { 
                             roomID: sessionId, 
-                            newHostId: friends[0].id 
+                            newHostUUId: friends[0].id 
                         }, () => {
                             secureEmit('leave-session', sessionId);
                             handleCleanExit();
@@ -171,6 +184,17 @@ export const UserProvider = ({ children }) => {
                   }]
             );
         }
+    };
+
+    // --- DESANITIZE INCOMING TEXT ---
+    const desanitize = (text) => {
+        if (typeof text !== 'string') return '';
+        return text
+            .replace(/&amp;/g, "&")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&quot;/g, '"')
+            .replace(/&#039;/g, "'");
     };
 
     // --- CONNECTION MANAGER ---
@@ -220,8 +244,15 @@ export const UserProvider = ({ children }) => {
                     roomID: sessionIdRef.current,
                     existingUUID: userUUID
                 }, (response) => {
-                    if (response.exists) {
+                    if (response && response.exists) {
                         console.log("Rejoin successful");
+                        if (response.alreadyRegistered) {
+                            setName(response.userData.name);
+                            setSelectedColor(response.userData.color);
+                            setHasRegistered(true);
+                        } else {
+                            console.log("User still in setup phase, staying on Profile.");
+                        }
                     } else {
                         handleCleanExit();
                     }
@@ -252,34 +283,60 @@ export const UserProvider = ({ children }) => {
 
         const onUserUpdate = (users) => {
             setSessionUsers((prev) => {
+                const otherUsers = users.filter(u => u.id !== userUUID);
+                setFriends(otherUsers);
                 if (users.length > prev.length && prev.length !== 0) playJoinSound();
                 return users;
             });
         };
 
-        const onReceiveMessage = (data) => {
-            setAllMessages((prev) => {
-                const roomMsgs = prev[data.roomID] || [];
-                if (roomMsgs.some(m => m.id === data.id)) return prev;
-                return { ...prev, [data.roomID]: [...roomMsgs, data] };
+        // message appears immediately on sender's screen, then updates when the server confirms it
+        const onReceiveMessage = (messageData) => {
+            const desanitizedMessage = {
+                ...messageData,
+                status: 'sent',
+                context: {
+                    ...messageData.context,
+                    text: desanitize(messageData.context.text)
+                }
+            };
+
+            setAllMessages(prev => {
+                const roomMsgs = prev[desanitizedMessage.roomID] || [];
+                // check if we already have a "local" version of this message
+                // look for message with same text/sender that doesn't have a server timestamp yet
+                // check if this is a message we sent that the server is returning
+                const filteredMsgs = roomMsgs.filter(m => m.id !== desanitizedMessage.id);
+
+                return {
+                    ...prev,
+                    [desanitizedMessage.roomID]: [...filteredMsgs, desanitizedMessage]
+                };
             });
 
-            const route = navigationRef.getCurrentRoute();
-            const isViewing = (route?.name === 'Chat' && (data.roomID === route.params?.roomID || data.roomID === route.params?.dmRoomID));
-            if (!isViewing) {
-                showNotification({
-                    title: data.isDirectMessage ? `💬 ${data.sender}` : `👥 General Chat (${data.sender})`,
-                    message: data.context?.text || "New message",
-                    roomID: data.roomID,
-                    isDM: data.isDirectMessage
+            // unread logic
+            // console.log("activeRoomRef.current: ", activeRoomRef.current);
+            // console.log("messageData.roomID: ", messageData.roomID);
+            if (desanitizedMessage.roomID !== activeRoomRef.current) {
+                setUnreadRooms(prev => {
+                    // if the room is already in unread list, do nothing
+                    if (prev.includes(desanitizedMessage.roomID)) return prev;
+                    // otherwise add it to the list
+                    return [...prev, desanitizedMessage.roomID];
+                });
+                const isDM = desanitizedMessage.roomID.includes('_');
+                showNotification({ 
+                    title: isDM ? (`👤 ${desanitizedMessage.sender}`) : (`💬 ${desanitizedMessage.sender}`), 
+                    message: desanitizedMessage.context.text,
+                    roomID: desanitizedMessage.roomID,
+                    isDM: isDM,
+                    type: 'info'
                 });
             }
         };
 
         const onSessionEnded = () => {
-            if (!isHostRef.current)    {
-                Alert.alert("The host has ended the session.");
-            }
+            if (!isHostRef.current) Alert.alert("The host has ended the session.");
             handleCleanExit();
         };
 
@@ -321,14 +378,14 @@ export const UserProvider = ({ children }) => {
             socket.off('removed-from-session', onRemoved);
             socket.off('host-change', onHostChange);
         };
-    }, [userUUID, showNotification, handleCleanExit]); // empy to ensure it only runs once on mount
+    }, [socket, userUUID, showNotification, handleCleanExit]); 
 
     return (
         <UserContext.Provider value={{
             name, setName, selectedColor, setSelectedColor, hasRegistered, 
             setHasRegistered, socket, isConnected, sessionId, setSessionId, sessionUsers, setSessionUsers, secureEmit,
             handleCleanExit, isHost, setIsHost, allMessages, setAllMessages, justCreatedSession, userUUID, setUserUUID,
-            onLeave
+            onLeave, unreadRooms, setUnreadRooms, markAsRead, friends, setFriends
         }}>
             {children}
 
@@ -345,13 +402,13 @@ export const UserProvider = ({ children }) => {
                     <TouchableOpacity
                         activeOpacity={0.9}
                         onPress={() => { 
+                            const { roomID, isDM, title } = notification;
                             setNotification(null);
-                                if (notification.roomID)    {
+                                if (roomID)    {
                                     navigationRef.navigate('Chat', { 
-                                        isDirectMessage: notification.isDM,
-                                        roomID: !notification.isDM ? notification.roomID : undefined,
-                                        dmRoomID: notification.isDM ? notification.roomID : undefined,
-                                        recipientName: notification.isDM ? notification.title.replace('💬 ', '') : undefined,
+                                        isDirectMessage: isDM,
+                                        dmRoomID: isDM ? roomID : null,
+                                        recipientName: isDM ? title.replace('👤 ', '').replace('💬 ', '') : undefined,
                                     });
                                 }
                         }}

@@ -109,10 +109,13 @@ export const styles = StyleSheet.create({
         marginTop: 50, // Matches your layout
         height: 45,
         paddingHorizontal: 12,
-        borderRadius: 15,
+        borderRadius: 12,
         borderWidth: 1,
+        borderColor: 'rgba(0, 0, 0, 0.1)',
         justifyContent: 'center',
+        alignItems: 'center',
         minWidth: 80, // Ensures it doesn't get too tiny
+        flexDirection: 'row',
     },
     headerButtonText: {
         color: 'black',
@@ -213,6 +216,17 @@ export const styles = StyleSheet.create({
     userName: {
         fontSize: 16,
         flex: 1,
+    },
+    unreadDotOverlap: {
+        position: 'absolute',
+        top: 4,
+        right: 4,
+        width: 9,
+        height: 9,
+        borderRadius: 6,
+        backgroundColor: '#ff3b30',
+        // borderWidth: 2,
+        // borderColor: '#ffffff'
     },
     // notifications
     notificationBar: {

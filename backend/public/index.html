@@ -19,18 +19,18 @@
         .btn-join { background: #007bff; color: white; }
         .btn-send { background: #007bff; color: white; padding: 10px 20px; }
         
-        /* Host/DM Buttons */
         .btn-kick { background: #dc3545; color: white; margin-left: 5px; }
         .btn-transfer { background: #f39c12; color: white; margin-left: 5px; }
         .btn-dm { background: #6f42c1; color: white; margin-left: 5px; }
 
-        #chatArea { height: 250px; border: 1px solid #eee; border-radius: 8px; overflow-y: auto; padding: 15px; background: #fafafa; display: flex; flex-direction: column; margin-bottom: 10px; }
-        .msg { margin-bottom: 10px; max-width: 85%; padding: 8px 12px; border-radius: 15px; font-size: 14px; line-height: 1.4; }
-        .my-msg { align-self: flex-end; background: #007bff20; border: 1px solid #007bff40; }
-        .their-msg { align-self: flex-start; background: #e5e5ea; }
-        .dm-msg { border: 1px dashed #6f42c1; background: #fdfcfe; }
+        #chatArea { height: 300px; border: 1px solid #eee; border-radius: 8px; overflow-y: auto; padding: 15px; background: #fafafa; display: flex; flex-direction: column; margin-bottom: 10px; }
+        .msg { margin-bottom: 10px; max-width: 85%; padding: 8px 12px; border-radius: 15px; font-size: 14px; display: flex; flex-direction: column; }
+        .my-msg { align-self: flex-end !important; background-color: #007bff !important; color: white !important; margin-left: auto !important; }
+        .their-msg { align-self: flex-start !important; background-color: #e5e5ea !important; color: black !important; margin-right: auto !important; }
+        .dm-msg { border: 2px solid #6f42c1; }
         
         .msg-header { font-size: 11px; font-weight: bold; margin-bottom: 3px; display: block; }
+        .typing-indicator { font-size: 12px; font-style: italic; color: #888; height: 20px; margin-bottom: 5px; }
         ul { list-style: none; padding: 0; }
         li { padding: 10px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
         .crown { color: #f1c40f; margin-right: 5px; }
@@ -45,8 +45,8 @@
     <div id="setupArea">
         <div class="card">
             <h3>User Identity</h3>
-            <input type="text" id="nameInput" placeholder="Your Name" value="Browser User">
-            <input type="hidden" id="colorInput" value="#1e8fff"> 
+            <input type="text" id="nameInput" placeholder="Your Name" value="Browser Admin">
+            <p style="font-size: 10px; color: #999;">UUID: <span id="uuidDisplay">...</span></p>
         </div>
         <div class="card">
             <h3>Create Session</h3>
@@ -67,10 +67,12 @@
         </div>
 
         <h3>Session: <span id="currentRoomDisplay"></span></h3>
+        
         <div id="chatArea"></div>
+        <div id="typingArea" class="typing-indicator"></div>
         
         <div style="display:flex; gap:10px;">
-            <input type="text" id="chatInput" style="flex:1" placeholder="Type a message..." onkeypress="if(event.key==='Enter') sendChat()">
+            <input type="text" id="chatInput" style="flex:1" placeholder="Type a message..." oninput="handleTyping()" onkeypress="if(event.key==='Enter') sendChat()">
             <button class="btn-send" onclick="sendChat()">Send</button>
         </div>
 
@@ -82,9 +84,21 @@
 
 <script>
     const socket = io();
+    const myBrowserColor = '#1e8fff';
+    
+    // --- IDENTITY LOGIC ---
+    // Generate or retrieve a persistent UUID for the browser session
+    let myUUID = localStorage.getItem('browser_uuid');
+    if (!myUUID) {
+        myUUID = 'browser-' + Math.random().toString(36).substr(2, 9);
+        localStorage.setItem('browser_uuid', myUUID);
+    }
+    document.getElementById('uuidDisplay').innerText = myUUID;
+
     let myCurrentRoom = null;
-    let activeDM = null; // { id, name, roomID }
+    let activeDM = null; // { uuid, name, roomID }
     let amIHost = false;
+    let typingTimeout = null;
 
     socket.on('connect', () => {
         document.getElementById('status').innerText = "Connected: " + socket.id;
@@ -93,40 +107,50 @@
 
     // --- MESSAGE LOGIC ---
     socket.on('receive-message', (data) => {
-        console.log("📨 Data received in browser:", data);
+        console.log("📨 Incoming:", data);
+        // console.log("browser UUID: ", myUUID);
 
-        if (data.isDirectMessage) {
-            // 1. If we aren't in a DM window, open it automatically for the new sender
-            if (!activeDM) {
-                // 'data.id' is the socket ID of the phone user
-                enterDM(data.id, data.sender || "Phone User");
-            }
-            
-            // 2. Display the message
-            // We verify: Is it from the person we are looking at? OR is it from us?
-            const isFromActivePartner = (data.id === activeDM?.id);
-            const isFromMe = (data.id === socket.id);
+        // 1. Identify Sender
+        const isMe = data.senderUUID === myUUID;
 
-            if (isFromActivePartner || isFromMe) {
-                displayMessage(data, isFromMe, true);
+        // 2. STOP if it's our own message (prevents doubling)
+        if (isMe) return;
+
+        // 3. Logic based on your log: isDirectMessage
+        const isDM = data.isDirectMessage === true || data.roomID.includes('_');
+
+        if (isDM) {
+            if (!activeDM) enterDM(data.senderUUID, data.sender);
+            if (data.roomID === activeDM?.roomID) {
+                displayMessage(data, false, true);
             }
-        } 
-        else if (data.roomID === myCurrentRoom && !activeDM) {
-            // Group message logic
-            displayMessage(data, data.id === socket.id, false);
+        } else if (data.roomID === myCurrentRoom && !activeDM) {
+            displayMessage(data, false, false);
         }
     });
-    
-    // --- HOST & USER UPDATES ---
+
+    // --- TYPING INDICATORS ---
+    socket.on('user-typing', (data) => {
+        if (data.roomID === (activeDM ? activeDM.roomID : myCurrentRoom)) {
+            if (data.id !== socket.id) {
+                document.getElementById('typingArea').innerText = `${data.name} is typing...`;
+            }
+        }
+    });
+
+    socket.on('user-stop-typing', (data) => {
+        document.getElementById('typingArea').innerText = '';
+    });
+
     socket.on('host-change', (newHostId) => {
-        amIHost = (socket.id === newHostId);
+        amIHost = (myUUID === newHostId);
     });
 
     socket.on('user-update', (users) => {
         const list = document.getElementById('userList');
         list.innerHTML = '';
         users.forEach(u => {
-            const isMe = u.id === socket.id;
+            const isMe = u.id === myUUID; // Using UUID for identification
             const li = document.createElement('li');
             
             li.innerHTML = `
@@ -148,17 +172,25 @@
         location.reload();
     });
 
-    // --- FUNCTIONS ---
+    // --- ACTIONS ---
     function createSession() {
         const roomID = document.getElementById('createIdInput').value.toUpperCase();
         if (!roomID) return;
-        socket.emit('create-session', roomID, () => setupUI(roomID));
+        const payload = {
+            roomID: roomID,
+            existingUUID: myUUID // Passing this helps the server recognize the browser
+        };
+        socket.emit('create-session', payload, () => setupUI(roomID));
     }
 
     function joinSession() {
         const roomID = document.getElementById('joinIdInput').value.toUpperCase();
         if (!roomID) return;
-        socket.emit('join-session', roomID, (res) => {
+        const payload = {
+            roomID: roomID,
+            existingUUID: myUUID // Passing this helps the server recognize the browser
+        };
+        socket.emit('join-session', payload, (res) => {
             if (res.exists) setupUI(roomID);
             else alert("Room not found");
         });
@@ -169,20 +201,41 @@
         document.getElementById('setupArea').style.display = 'none';
         document.getElementById('roomArea').style.display = 'block';
         document.getElementById('currentRoomDisplay').innerText = roomID;
+        
+        // 1. Get our name
+        const myName = document.getElementById('nameInput').value;
+        // console.log("setting up user");
+
+        // 2. Register with the server
         socket.emit('update-user', { 
-            name: document.getElementById('nameInput').value, 
-            color: '#1e8fff', 
-            sessionId: roomID 
+            name: myName, 
+            uuid: myUUID, // We send our browser ID...
+            sessionId: roomID,
+            color: myBrowserColor,
+        }, (response) => {
+            // console.log("response: ", response);
+            // 3. THE FIX: If the server says "No, your ID is actually X", 
+            // we update our local variable to match.
+            if (response && response.uuid) {
+                myUUID = response.uuid;
+                document.getElementById('uuidDisplay').innerText = myUUID;
+                // console.log("Updated local UUID to match server:", myUUID);
+            }
         });
     }
 
-    function enterDM(id, name) {
-        const dmRoomID = [socket.id, id].sort().join('_');
-        activeDM = { id, name, roomID: dmRoomID };
-        socket.emit('join-dm', { dmRoomID, targetName: name });
+    function enterDM(targetUUID, targetName) {
+        // Build the same DM Room ID logic as the phone app
+        const dmRoomID = [myUUID, targetUUID].sort().join('_');
+        activeDM = { uuid: targetUUID, name: targetName, roomID: dmRoomID };
+        console.log("active DM: ", activeDM);
+        
+        socket.emit('join-dm', { dmRoomID, targetName: targetName });
+        
         document.getElementById('dmIndicator').style.display = 'flex';
-        document.getElementById('dmTargetName').innerText = name;
-        document.getElementById('chatArea').innerHTML = ''; // Clear for private view
+        document.getElementById('dmTargetName').innerText = targetName;
+        document.getElementById('chatArea').innerHTML = ''; 
+        document.getElementById('typingArea').innerText = '';
     }
 
     function exitDM() {
@@ -191,87 +244,97 @@
         document.getElementById('chatArea').innerHTML = ''; 
     }
 
+    function handleTyping() {
+        socket.emit('typing', { 
+            roomID: activeDM ? activeDM.roomID : myCurrentRoom, 
+            name: document.getElementById('nameInput').value 
+        });
+
+        clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(() => {
+            socket.emit('stop-typing', { roomID: activeDM ? activeDM.roomID : myCurrentRoom });
+        }, 2000);
+    }
+
     function sendChat() {
         const input = document.getElementById('chatInput');
         const text = input.value.trim();
         const myName = document.getElementById('nameInput').value;
         if (!text) return;
 
-        // --- GENERATE UNIQUE ID HERE ---
-        // Using a fallback for older browsers just in case
-        const uniqueId = window.crypto.randomUUID ? window.crypto.randomUUID() : 
-                        (Date.now().toString(36) + Math.random().toString(36).substr(2));
-
         const messageData = {
-            id: uniqueId, // <--- Attach the UUID
+            id: 'msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+            roomID: activeDM ? activeDM.roomID : myCurrentRoom,
             sender: myName,
-            context: { text },
+            senderUUID: myUUID,
+            context: { 
+                text: text,
+                isEncrypted: false,
+                version: "1.0"
+            },
             color: '#1e8fff',
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            senderId: socket.id
+            serverTimestamp: Date.now(),
+            isDM: !!activeDM
         };
+        console.log("messageData from browser: ", messageData);
 
         if (activeDM) {
-            // 1. Send to server
             socket.emit('send-direct-message', {
-                ...messageData, // Includes our new ID
-                recipientId: activeDM.id,
+                id: messageData.id,
+                recipientUUID: activeDM.uuid,
+                context: messageData.context,
+                senderUUID: myUUID,
                 fromName: myName
             });
-
-            // 2. Display on own screen
-            displayMessage(messageData, true, true);
-
+            console.log("in socket.emit from browser: ", activeDM.uuid, messageData.context, myUUID, myName);
         } else {
-            // Group Chat logic
             socket.emit('send-message', {
-                ...messageData, // Includes our new ID
+                id: messageData.id,
                 roomID: myCurrentRoom,
+                context: messageData.context,
+                senderUUID: myUUID,
+                sender: myName
             });
-            
-            displayMessage(messageData, true, false);
         }
+        
+        // Optimistic display
+        displayMessage(messageData, true, !!activeDM);
         input.value = '';
+        socket.emit('stop-typing', { roomID: activeDM ? activeDM.roomID : myCurrentRoom });
     }
     
-    // MATCHES SERVER: {roomID, newHostId}
     function transferHost(targetId) {
         if(confirm("Promote this user to host?")) {
-            socket.emit('transfer-host', { roomID: myCurrentRoom, newHostId: targetId });
+            socket.emit('transfer-host', { roomID: myCurrentRoom, newHostUUID: targetId });
         }
     }
 
-    // MATCHES SERVER: {roomID, userIdToRemove}
     function removeUser(targetId) {
         if(confirm("Remove this user from the session?")) {
-            socket.emit('remove-user', { roomID: myCurrentRoom, userIdToRemove: targetId });
+            socket.emit('remove-user', { roomID: myCurrentRoom, userUUIDToRemove: targetId });
         }
     }
 
-    function displayMessage(data, isMe, isDM) {
+    function displayMessage(data, amISender, isDM) {
+        console.log("displayMessage parameters from browser: ", data, amISender, isDM);
         const chatArea = document.getElementById('chatArea');
+        
+        // Safety check for duplicates
+        if (data.id && document.querySelector(`[data-msg-id="${data.id}"]`)) return;
+
         const div = document.createElement('div');
-        
-        // 1. IMPROVED LOGIC: 
-        // If isMe is passed, use it. Otherwise, check if the senderId matches ours.
-        const amISender = isMe || (data.senderId === socket.id);
-        
         div.className = `msg ${amISender ? 'my-msg' : 'their-msg'} ${isDM ? 'dm-msg' : ''}`;
-        
-        // 2. Add a unique attribute to the div (useful for debugging)
         if (data.id) div.setAttribute('data-msg-id', data.id);
         
-        const text = data.context ? data.context.text : '...';
-        
-        // 3. CLEANER HTML:
-        // We don't usually show our own name on our own bubbles in chat apps.
+        // Match your log: data.context.text
+        const messageText = data.context?.text || data.text || "...";
         const senderName = amISender ? "You" : data.sender;
         
         div.innerHTML = `
-            <span class="msg-header" style="color:${data.color || '#000'}">
+            <span style="font-size: 10px; font-weight: bold; margin-bottom: 2px; opacity: 0.8;">
                 ${isDM ? '🔒 ' : ''}${senderName}
             </span>
-            <div class="msg-text">${text}</div>
+            <div>${messageText}</div>
         `;
         
         chatArea.appendChild(div);

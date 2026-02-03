@@ -35,6 +35,9 @@ const myTheme = {
 };
 
 function TabNavigator() {
+  const { unreadRooms } = useUser();
+  const hasUnread = unreadRooms.length > 0;
+
   return(
     <Tab.Navigator
       tabBarPosition="bottom"
@@ -68,7 +71,34 @@ function TabNavigator() {
     >
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Map" component={MapScreen} />
-      <Tab.Screen name="Chat" component={ChatScreen} />
+      <Tab.Screen 
+        name="Chat" 
+        component={ChatScreen} 
+        options={{
+          tabBarIcon: ({ focused, color }) => (
+            <View>
+              <Ionicons
+                name={focused ? 'chatbubbles' : 'chatbubbles-outline'}
+                size={24}
+                color={color}
+              />
+              {hasUnread && (
+                <View style={{
+                  position: 'absolute',
+                  right: -6,
+                  top: -3,
+                  backgroundColor: 'red',
+                  borderRadius: 6,
+                  width: 12,
+                  height: 12,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                }} />
+              )}
+            </View>
+          )
+        }}
+      />
       <Tab.Screen name="Profile" component={ProfileScreen} />
   </Tab.Navigator>
   );
@@ -76,6 +106,7 @@ function TabNavigator() {
 
 function AppNavigator() {
   const { hasRegistered } = useUser();
+
 
   return (
     <Stack.Navigator 

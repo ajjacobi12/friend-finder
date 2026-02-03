@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'; // useState lets app remember things (eg. messages), useEffect allows app to perform actions (eg. connecting ot the server) as soon as it opens
-import { Text, View, StatusBar, TouchableOpacity, Alert, FlatList, Pressable, ScrollView, 
+import { Text, View, StatusBar, Alert, FlatList, Pressable, ScrollView, 
     Animated, Easing, BackHandler } from 'react-native'; // components; similar to HTML's tags <div> or <h1>, view = <div>, text for all strings
 import { useFocusEffect } from '@react-navigation/native';
 import { styles } from '../styles';
@@ -17,13 +17,11 @@ export default function HomeScreen({ navigation }) {
     // whenever "set" function is called, React Native automatically re-renders (refreshes) the screen to show the new info
     const {
         name, selectedColor, socket, isConnected, sessionUsers, sessionId, secureEmit, 
-        handleCleanExit, isHost, onLeave
+        handleCleanExit, isHost, onLeave, userUUID, friends
     } = useUser();
 
     // takes care of android "back" button
     useSessionBackHandler(onLeave);
-
-    const friends = sessionUsers.filter(u => u.id !== socket.id);
 
     const removeUser = (sessionID, friend) => {
         Alert.alert(
@@ -33,7 +31,7 @@ export default function HomeScreen({ navigation }) {
                 {text: "No", style: "cancel", onPress: () => console.log("Canceled remove user.") },
                 {text: "Yes", style: "destructive",
                     onPress: () => { 
-                        secureEmit('remove-user', { roomID: sessionID, userIdToRemove: friend.id })
+                        secureEmit('remove-user', { roomID: sessionID, userUUIDToRemove: friend.id })
                     }
                 }
             ]
@@ -63,7 +61,7 @@ export default function HomeScreen({ navigation }) {
                 { text: "Yes", style: "destructive",
                     onPress: () => secureEmit('transfer-host', { 
                         roomID: sessionID, 
-                        newHostId: friend.id 
+                        newHostUUID: friend.id 
                     })
                 }
             ]
@@ -90,9 +88,15 @@ export default function HomeScreen({ navigation }) {
                         onPress={onLeave}  // () => means do this only when button is pressed
                         style={({ pressed }) => [
                             styles.headerButton, {
-                                backgroundColor: '#ff000046',
-                                borderColor: '#ff00005d',
-                                borderWidth: 0
+                                backgroundColor: pressed ? '#ff3b3015' : '#ffffff', // Keep button white for contrast
+                                borderColor: pressed ? '#ff3b30' : '#ff3b301f', // Red edge
+                                borderWidth: 1,                                
+                                // --- The "Red Glow" Shadow ---
+                                shadowColor: '#ff3b30', // Apple's standard red
+                                shadowOffset: { width: 0, height: pressed ? 1 : 3 },
+                                shadowOpacity: pressed ? 0.2 : 0.3,
+                                shadowRadius: pressed ? 2 : 6,
+                                elevation: pressed ? 2 : 10,                               
                             }
                         ]}>
                         <Text style={{ color: 'black', fontWeight: 'bold', fontSize: 15, textAlign: 'center'}}>{"Leave"}{"\n"}{"Session"}</Text>
@@ -110,9 +114,15 @@ export default function HomeScreen({ navigation }) {
                         onPress={endSessionForAll}  // () => means do this only when button is pressed
                         style={({ pressed }) => [
                             styles.headerButton, {
-                                backgroundColor: '#ff000046',
-                                borderColor: '#ff00005d',
-                                borderWidth: 0
+                                backgroundColor: pressed ? '#ff3b3015' : '#ffffff', // Keep button white for contrast
+                                borderColor: pressed ? '#ff3b30' : '#ff3b301f', // Red edge
+                                borderWidth: 1,                                
+                                // --- The "Red Glow" Shadow ---
+                                shadowColor: '#ff3b30', // Apple's standard red
+                                shadowOffset: { width: 0, height: pressed ? 1 : 4 },
+                                shadowOpacity: pressed ? 0.2 : 0.3,
+                                shadowRadius: pressed ? 2 : 6,
+                                elevation: pressed ? 2 : 10,    
                             }
                         ]}>
                         <Text style={{ color: 'black', fontWeight: 'bold', fontSize: 15, textAlign: 'center'}}>{"End Session"}{"\n"}{"For All"}</Text>
@@ -195,16 +205,16 @@ export default function HomeScreen({ navigation }) {
                                     {/* HOST TOOLS */}
                                     {isHost && (
                                         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', flexShrink: 0 }}>
-                                            <TouchableOpacity
+                                            <Pressable
                                                 onPress={() => handleTransferHost(sessionId, friend )}
                                                 style={{ marginLeft: 30 }}>
                                                 <Text style={{ fontSize: 20 }}>👑 </Text>
-                                            </TouchableOpacity>
-                                            <TouchableOpacity
+                                            </Pressable>
+                                            <Pressable
                                                 onPress={() => removeUser(sessionId, friend )}
                                                 style={{ marginLeft: 10 }}>
                                                 <Text style={{ color: 'red', fontWeight: 'bold', fontSize: 17 }}>Remove</Text>
-                                            </TouchableOpacity>
+                                            </Pressable>
                                         </View>
                                     )}
                                 </View>   

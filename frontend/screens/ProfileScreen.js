@@ -1,6 +1,6 @@
 // ---- imports ------
 import React, { useState, useCallback, useRef, useEffect } from 'react'; // useState lets app remember things (eg. messages), useEffect allows app to perform actions (eg. connecting ot the server) as soon as it opens
-import { Text, View, StatusBar, TouchableOpacity, Pressable, TextInput, Keyboard, TouchableWithoutFeedback } from 'react-native'; // components; similar to HTML's tags <div> or <h1>, view = <div>, text for all strings
+import { Text, View, StatusBar, Pressable, TextInput, Keyboard, TouchableWithoutFeedback } from 'react-native'; // components; similar to HTML's tags <div> or <h1>, view = <div>, text for all strings
 import { useFocusEffect } from '@react-navigation/native';
 import { styles } from '../styles';
 import { useUser } from '../UserContext';
@@ -118,8 +118,7 @@ export default function ProfileScreen({ navigation }) {
         // tell server who user is before switching screens
         secureEmit('update-user', {
             name: tempName.trim(),
-            color: selectedColor,
-            sessionId: sessionId
+            color: selectedColor
         }, (response) => {
             setLoading(false);
             if (response && response.success) {
@@ -207,7 +206,7 @@ export default function ProfileScreen({ navigation }) {
                         {colorOptions.map((color) => {
                             const heldBySomeoneElse = friends.some(f => f.color === color);
                                 return (
-                                    <TouchableOpacity
+                                    <Pressable
                                         key={color}
                                         disabled={heldBySomeoneElse}
                                         style={[
@@ -246,13 +245,13 @@ export default function ProfileScreen({ navigation }) {
 
                     {/* enter lobby button */}
                     {(sessionId && !hasRegistered) ? (
-                        <TouchableOpacity 
+                        <Pressable 
                             style={styles.button} 
                             onPress={handleJoin} 
                             disabled={loading}
                         >
                             <Text style={[styles.buttonText, { fontSize: 25}]}>{loading ? "Entering..." : "Enter Lobby"}</Text>
-                        </TouchableOpacity>
+                        </Pressable>
                     ) : null}
 
                 {/* end of content container */}
