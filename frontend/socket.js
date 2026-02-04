@@ -10,18 +10,17 @@ import { io } from 'socket.io-client';
 // http = protocol, numbers = computer's local IP address, 3000 = port
 // can't use localhost because it's phone-computer connection, 
 // need to use computer's IP address so phone knows where to send the "knock" over wifi
-const SERVER_URL = "http://192.168.1.170:3000"; 
-// const SERVER_URL = "http://192.168.1.8:3000"
+const SERVER_URL = "http://192.168.1.8:3000"
 
 // create socket once and export it
 // initializes connection; eg. dialing the phone number but not speaking yet
 const socket = io(SERVER_URL, {
     transports: ['polling', 'websocket'],
-    reconnection: false, // stops internal library from trying to reconnect automatically, keeps it up to us
+    reconnection: true, // allows internal library to reconnect automatically
     reconnectionAttempts: Infinity,
-    reconnectionDelay: 500, // try to reconnect every 1 second
-    reconnectionDelayMax: 2000, // never wait more than 5 seconds between tries
-    randomizationFactor: 0,
+    reconnectionDelay: 1000, // try to reconnect every 1 second
+    reconnectionDelayMax: 3000, // never wait more than 5 seconds between tries
+    randomizationFactor: 0.5,
     timeout: 20000, // 20 seconds before giving up
 }); 
 // by default, socket.io tries HTTP Long Polling first (like sending a bunch of letters),

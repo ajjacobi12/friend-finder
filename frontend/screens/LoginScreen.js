@@ -1,6 +1,6 @@
 // ----- IMPORTS -------
 import React, { useState, useLayoutEffect, useRef } from 'react';
-import { View, Text, TextInput, StatusBar, Pressable, Animated, Dimensions, Platform, Keyboard, TouchableWithoutFeedback, PanResponder } from 'react-native';
+import { View, Text, TextInput, StatusBar, Pressable, Animated, Dimensions, Platform, Keyboard, TouchableWithoutFeedback, PanResponder, Alert } from 'react-native';
 import { styles } from '../styles';
 import { useUser } from '../UserContext';
 
@@ -52,7 +52,11 @@ export default function LoginScreen( { navigation }) {
 
     // ------ START NEW SESSION --------
     const startNewSession = () => {
-        if (loading || !isConnected) return;
+        if (!isConnected){
+            Alert.alert("Connection Error", "Cannot create a new session while offline. Please check your internet connection and try again.");
+            return;
+        }
+        if (loading) return;
         setLoading(true);
         justCreatedSession.current = true;
         // generate random 6 character key
@@ -74,7 +78,11 @@ export default function LoginScreen( { navigation }) {
     // this is socket.io acknowledgement, it's asking a question and waiting for an answer
     // response is a function that theserver executes once it finishes checking its database
     const joinSession = () => {
-        if (!tempCode || loading || !isConnected) return;
+        if (!isConnected){
+            Alert.alert("Connection Error", "Cannot join a session while offline. Please check your internet connection and try again.");
+            return;
+        }
+        if (!tempCode || loading) return;
         setLoading(true);
         setErrorMsg("");
 
@@ -146,18 +154,18 @@ export default function LoginScreen( { navigation }) {
         }).start();
     };
 
-    if (!isConnected) {
-        return (
-            <View style={[styles.container, {justifyContent: 'center', flex: 1}]}>
-                <StatusBar barStyle="dark-content" /> 
-                <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ fontSize: 22, fontWeight: 'bold', color: 'red', textAlign: 'center' }}>
-                    The server is offline. Please try again later.
-                    </Text>
-                </View>
-            </View>
-        );
-    }
+    // if (!isConnected) {
+    //     return (
+    //         <View style={[styles.container, {justifyContent: 'center', flex: 1}]}>
+    //             <StatusBar barStyle="dark-content" /> 
+    //             <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+    //                 <Text style={{ fontSize: 22, fontWeight: 'bold', color: 'red', textAlign: 'center' }}>
+    //                 The server is offline. Please try again later.
+    //                 </Text>
+    //             </View>
+    //         </View>
+    //     );
+    // }
 
     return (
         <View style={{ flex: 1, backgroundColor: '#ffffff', overflow: 'hidden' }} {...panResponder.panHandlers}>
@@ -200,7 +208,7 @@ export default function LoginScreen( { navigation }) {
                    
                 {/* ---- SCREEN 2: JOIN INPUT (RIGHT) ---- */}
                 <View style={{ width: width, flex: 1 }}>
-                    <View style={styles.customHeader, { position: 'absolute', top: 50 }}>
+                    <View style={[styles.customHeader, { position: 'absolute', top: 50 }]}>
                     {/* back button */}
                         <Pressable 
                             onPress={hideJoinInput}

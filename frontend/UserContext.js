@@ -2,7 +2,7 @@
 
 // ---- IMPORTS -----
 import React, { useState, createContext, useContext, useEffect, useCallback, useRef } from 'react';
-import { Alert, TouchableOpacity, View, Text, Animated, PanResponder } from 'react-native';
+import { Alert, TouchableOpacity, View, Text, Animated, PanResponder, ActivityIndicator } from 'react-native';
 import socket from './socket';
 import { Audio } from 'expo-av';
 import { navigationRef } from './navigationService';
@@ -28,6 +28,7 @@ export const UserProvider = ({ children }) => {
     const [userUUID, setUserUUID] = useState(null);
     const [unreadRooms, setUnreadRooms] = useState([]);
     const [currentActiveRoom, setCurrentActiveRoom] = useState(null);
+    const [isReconnecting, setIsReconnecting] = useState(false);
 
     const slideAnim = useRef(new Animated.Value(-100)).current;
     const hideTimeout = useRef(null);
@@ -35,6 +36,7 @@ export const UserProvider = ({ children }) => {
     const isConnectingRef = useRef(false);
     const justCreatedSession = useRef(false);
     const activeRoomRef = useRef(currentActiveRoom);
+    const showOverlayTimeoutRef = useRef(null);
 
     const sessionIdRef = useRef(sessionId);
     const isHostRef = useRef(isHost);
@@ -73,7 +75,9 @@ export const UserProvider = ({ children }) => {
             'join-dm',
             'transfer-host',
             'remove-user',
-            'end-session'
+            'end-session',
+            'edit-message',
+            'delete-message'
         ];
 
         if (infrastructureEvents.includes(eventName)) {
@@ -163,10 +167,14 @@ export const UserProvider = ({ children }) => {
                  { text: "Yes", onPress: () => {
                         secureEmit('transfer-host', { 
                             roomID: sessionId, 
-                            newHostUUId: friends[0].id 
-                        }, () => {
-                            secureEmit('leave-session', sessionId);
-                            handleCleanExit();
+                            newHostUUID: friends[0].id 
+                        }, (response) => {
+                            if (response && response.success) {
+                                secureEmit('leave-session', sessionId);
+                                handleCleanExit();
+                            } else {
+                                Alert.alert("Transfer failed.", "Could not transfer host. Please try again.");
+                            }
                         });
                      }
                   }]
@@ -199,23 +207,23 @@ export const UserProvider = ({ children }) => {
 
     // --- CONNECTION MANAGER ---
     // manually poke socket every 5 seconds if it's taking too long to realize the server is back
-    useEffect(() => {
-        const interval = setInterval(() => {
-            if (!socket.connected && !isConnectingRef.current) {
-                console.log("Socket disconnected, attempting to reconnect...");
-                isConnectingRef.current = true;
-                socket.connect();
-            }            
-        }, 5000); // every 5 seconds
-        return () => clearInterval(interval);
-    }, []);
+    // useEffect(() => {
+    //     const interval = setInterval(() => {
+    //         if (!socket.connected && !isConnectingRef.current) {
+    //             console.log("Socket disconnected, attempting to reconnect...");
+    //             isConnectingRef.current = true;
+    //             socket.connect();
+    //         }            
+    //     }, 5000); // every 5 seconds
+    //     return () => clearInterval(interval);
+    // }, []);
 
 
     // ----- CORE SOCKET LISTENERS -----
     // if socket changes (app starts up): 
     // if connecting set connection status to true
     // if disconnecting/connection drops then start cleanup
-    // if user-update is sent then play sound and update user list
+    // if is sent then play sound and update user list
     useEffect(() => {
         // sound stuff
         const playJoinSound = async () => {
@@ -237,6 +245,13 @@ export const UserProvider = ({ children }) => {
             setIsConnected(true);
             isConnectingRef.current = false;
 
+            // clear overlay immediately on connect
+            setIsReconnecting(false);
+            if (showOverlayTimeoutRef.current) {
+                clearTimeout(showOverlayTimeoutRef.current);
+                showOverlayTimeoutRef.current = null;
+            }
+
             // silent rejoin logic
             if (sessionIdRef.current && userUUID) {
                 console.log("Attempting silent rejoin for: ", sessionIdRef.current);
@@ -247,7 +262,7 @@ export const UserProvider = ({ children }) => {
                     if (response && response.exists) {
                         console.log("Rejoin successful");
                         if (response.alreadyRegistered) {
-                            setName(response.userData.name);
+                            setName(desanitize(response.userData.name));
                             setSelectedColor(response.userData.color);
                             setHasRegistered(true);
                         } else {
@@ -268,49 +283,99 @@ export const UserProvider = ({ children }) => {
         const onDisconnect = (reason) => {
             console.log("Disconnected:", reason);
             setIsConnected(false);
-            isConnectingRef.current = false;
+
+            // if clean disconnect (server kicked us or we left),don't show overlay
+            if (reason === "io server disconnect" || reason === "io client disconnect") {
+                handleCleanExit();
+                return;
+            }
             // if accidental drop, start grace period
             // if 'io server disconnect', the server kicked us, so exit immediately
-            const isAccidental = reason == "transport close" || reason === "ping timeout";
-            if (sessionIdRef.current && isAccidental) {
+            // const isAccidental = reason == "transport close" || reason === "ping timeout";
+            if (sessionIdRef.current) {
+                // wait 1.5 seconds before showing "reconnecting" overlay
+                showOverlayTimeoutRef.current = setTimeout(() => {
+                    setIsReconnecting(true);
+                }, 1500);
+                // 15s cleanup grace period
                 reconnectTimeoutRef.current = setTimeout(() => {
                     handleCleanExit();
+                    setIsReconnecting(false);
                 }, 15000);
-            } else if (reason === "io server disconnect") {
-                handleCleanExit();
-            }
+            } 
         };
 
         const onUserUpdate = (users) => {
+            const cleanUsers = users.map(u=> ({
+                ...u,
+                name: desanitize(u.name)
+            }));
+            // notify and play sound if someone joins
             setSessionUsers((prev) => {
-                const otherUsers = users.filter(u => u.id !== userUUID);
-                setFriends(otherUsers);
-                if (users.length > prev.length && prev.length !== 0) playJoinSound();
-                return users;
+                // second check prevents notifications for initial join for user regarding others already in session
+                if (cleanUsers.length > prev.length && prev.length !== 0) {
+                    const joinedUser = cleanUsers.find(u => !prev.some(p => p.id === u.id));
+                    // notify only if joined user is not self
+                    if (joinedUser && joinedUser.id !== userUUID) {
+                        playJoinSound();
+                        showNotification({ 
+                            title: `👤 ${joinedUser.name} `, 
+                            message: "has joined the session.",
+                            type: 'info'
+                        });
+                    }
+                }
+                if (cleanUsers.length < prev.length) {
+                    const leftUser = prev.find(p => !cleanUsers.some(u => u.id === p.id));
+                    // notify only if left user is not self
+                    if (leftUser) {
+                        showNotification({ 
+                            title: `👤 ${leftUser.name} `, 
+                            message: "has left the session.",
+                            type: 'info'
+                        });
+                    }
+                }
+                return cleanUsers;
             });
+
+            const otherUsers = cleanUsers.filter(u => u.id !== userUUID);
+            setFriends(otherUsers);
         };
 
         // message appears immediately on sender's screen, then updates when the server confirms it
         const onReceiveMessage = (messageData) => {
             const desanitizedMessage = {
                 ...messageData,
-                status: 'sent',
+                sender: desanitize(messageData.sender),
                 context: {
                     ...messageData.context,
                     text: desanitize(messageData.context.text)
-                }
+                },
+                status: 'sent'
             };
 
             setAllMessages(prev => {
-                const roomMsgs = prev[desanitizedMessage.roomID] || [];
+                const roomID = desanitizedMessage.roomID;
+                const roomMsgs = prev[roomID] || [];
                 // check if we already have a "local" version of this message
                 // look for message with same text/sender that doesn't have a server timestamp yet
                 // check if this is a message we sent that the server is returning
-                const filteredMsgs = roomMsgs.filter(m => m.id !== desanitizedMessage.id);
-
+                const existingMsgIndex = roomMsgs.findIndex(m => m.id === desanitizedMessage.id);
+                // if message is marked locally as failed, the server broadcast is arriving for message
+                if (existingMsgIndex !== -1) {
+                    const updatedMsgs = [...roomMsgs];
+                    updatedMsgs[existingMsgIndex] = {
+                        ...roomMsgs[existingMsgIndex],
+                        ...desanitizedMessage,
+                        status: 'sent'
+                    };
+                    return { ...prev, [roomID]: updatedMsgs };
+                }
+                // otherwise, just add the new message
                 return {
                     ...prev,
-                    [desanitizedMessage.roomID]: [...filteredMsgs, desanitizedMessage]
+                    [roomID]: [desanitizedMessage, ...roomMsgs]
                 };
             });
 
@@ -347,7 +412,8 @@ export const UserProvider = ({ children }) => {
 
         const onHostChange = (newHostUUID) => {
             const amIHost = userUUID === newHostUUID;
-            if (amIHost && !justCreatedSession.current) {
+            
+            if (amIHost && !justCreatedSession.current && !isHostRef.current) {
                 showNotification({ 
                     title: "👑 System Update", 
                     message: "You are now the host of this session.",
@@ -385,7 +451,7 @@ export const UserProvider = ({ children }) => {
             name, setName, selectedColor, setSelectedColor, hasRegistered, 
             setHasRegistered, socket, isConnected, sessionId, setSessionId, sessionUsers, setSessionUsers, secureEmit,
             handleCleanExit, isHost, setIsHost, allMessages, setAllMessages, justCreatedSession, userUUID, setUserUUID,
-            onLeave, unreadRooms, setUnreadRooms, markAsRead, friends, setFriends
+            onLeave, unreadRooms, setUnreadRooms, markAsRead, friends, setFriends, desanitize, isReconnecting
         }}>
             {children}
 
@@ -417,6 +483,18 @@ export const UserProvider = ({ children }) => {
                         <Text style={styles.notificationText} numberOfLines={1}>{notification.message}</Text>
                     </TouchableOpacity>
                 </Animated.View>
+            )}
+
+            {!isConnected && (
+                <View style={[styles.reconnectingOverlay, !isReconnecting && { backgroundColor: 'transparent' }]}>
+                    {/* spinner and text only visible once isReconnecting is true, which is a disconnection > 1.5 s */}
+                    {isReconnecting && (
+                        <View style={styles.reconnectBox}>
+                            <ActivityIndicator size="large" color="#ffffff" />
+                            <Text style={styles.reconnectingText}>Reconnecting to server...</Text>
+                        </View>
+                    )}   
+                </View>
             )}
         </UserContext.Provider>
     );

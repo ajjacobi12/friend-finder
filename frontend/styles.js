@@ -251,5 +251,30 @@ export const styles = StyleSheet.create({
     notificationText: { 
         color: '#ccc', 
         fontSize: 12 
-    }
+    },
+    // reconnect overlay
+    reconnectingOverlay: {  
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 9999,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    },
+    reconnectBox: {
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        padding: 25,
+        borderRadius: 15,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        elevation: 5,
+    },
+    reconnectingText: { 
+        color: '#ffffff',
+        marginTop: 15,
+        fontSize: 16,
+        fontWeight: '600',
+    },
 });

@@ -1,211 +1,64 @@
-import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { View, Text, Pressable, TextInput, FlatList, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
-import Modal from 'react-native-modal';
-import { useHeaderHeight } from '@react-navigation/elements';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { View, Text, Pressable, TextInput, FlatList, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { useUser } from '../UserContext';
 import { styles } from '../styles';
 import { useSessionBackHandler } from '../hooks/useSessionBackHandler';
+import { useHeaderHeight } from '@react-navigation/elements';
+import { Ionicons } from '@expo/vector-icons';
+import { useChatLogic } from '../hooks/useChatLogic';
 import { useIsFocused } from '@react-navigation/native';
+import MessageItem from './components/MessageItem';
+import Sidebar from './components/SidebarUserItem';
 
 export default function ChatScreen({ navigation, route }) {
-    const { socket, sessionId, name, selectedColor, secureEmit, sessionUsers, 
-        allMessages, setAllMessages, userUUID, onLeave, unreadRooms, markAsRead, friends } = useUser();
-    const [message, setMessage] = useState('');
+    const { sessionId, allMessages, userUUID, onLeave, unreadRooms } = useUser();
+    const isFocused = useIsFocused();
+
     const [isSidebarVisible, setIsSidebarVisible] = useState(false);
-    const [isTyping, setIsTyping] = useState(false);
-    const [typingUsers, setTypingUsers] = useState({});
+    const [isAtBottom, setIsAtBottom] = useState(true);
     
     const { isDirectMessage, dmRoomID, recipientName } = route.params || {};
-
     const currentRoomID = isDirectMessage ? dmRoomID : sessionId;
+
+    const chat = useChatLogic({ currentRoomID, isDirectMessage, dmRoomID, recipientName, navigation, sessionId, isFocused });
+
     const messages = allMessages[currentRoomID] || [];
-    const reverseMessages = React.useMemo(() => [...messages].reverse(), [messages]);
 
     const flatListRef = useRef();
-    const typingTimeoutRef = useRef(null);
-    const isTypingRef = useRef(false);
 
+    const editTimeLimit = 5 * 60 * 1000; // 5 minutes
     const headerHeight = useHeaderHeight();
-    const isFocused = useIsFocused();
+    const tabBarHeight = 110; // approximate height of the tab bar
 
     // take care of android "back" button
     useSessionBackHandler(onLeave);
 
-    // ensures server puts us in DM room so we can hear 'user-typing'
+    // handle scrolling of messages
+    const handleScroll = (event) => {
+        const offset = event.nativeEvent.contentOffset.y;
+        // in inverted list, 0 is at bottom
+        // if offset is small, user is near the bottom
+        setIsAtBottom(offset < 100);
+    };
+
+    const renderMessage = useCallback(({ item }) => (
+        <MessageItem item={item} />
+    ), []);
+
+    // --- EFFECTS & LISTENERS ---
+
+    // auto scroll only if user is already at bottom of messages or if it's
+    // their own message
     useEffect(() => {
-        if (isDirectMessage && dmRoomID) {
-            secureEmit('join-dm', { dmRoomID, targetName: recipientName });
-        } 
-    }, [isDirectMessage, dmRoomID]);
-
-    // typing indicators
-    useEffect(() => {
-        if (!socket) return;
-
-        const handleTyping = ( data ) => {
-            if (data.roomID === currentRoomID) {
-                setTypingUsers(prev => ({ ...prev, [data.id]: data.name }));
-            }
-        };
-
-        const handleStopTyping = ( data ) => {
-            setTypingUsers(prev => {
-                const newState = { ...prev };
-                delete newState[data.id]; // remove user from "typing" list
-                return newState;
+        if (messages.length > 0 && (isAtBottom || messages[0].senderUUID === userUUID)) {
+            requestAnimationFrame(() => {
+                flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
             });
-        };
-
-        socket.on('user-typing', handleTyping);
-        socket.on('user-stop-typing', handleStopTyping);
-
-        return () => {
-            socket.off('user-typing', handleTyping);
-            socket.off('user-stop-typing', handleStopTyping);
-            // clena local "typing" states
-            setTypingUsers({});
-
-            if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-            if (isTypingRef.current) {
-                secureEmit('stop-typing', { roomID: currentRoomID });
-            }
-        };
-    }, [socket, currentRoomID]);
+        }
+    }, [messages.length]);
             
-    // clear unread status of general chat as soon as navigating to chat
-    // also clear if new messages arrive while on screen
-    useEffect(() => {
-        markAsRead( isFocused ? currentRoomID : null);
-        return () => markAsRead(null);
-    }, [currentRoomID, markAsRead, isFocused]);
-
-    // generate a UUID
-    const generateUUID = () => {
-        // Check if we are in a browser that supports crypto
-        if (typeof window !== 'undefined' && window.crypto && window.crypto.randomUUID) {
-            return window.crypto.randomUUID();
-        }
-        // Fallback for React Native
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-            const r = (Math.random() * 16) | 0;
-            const v = c === 'x' ? r : (r & 0x3) | 0x8;
-            return v.toString(16);
-        });
-    };
-
-    // --- SEND MESSAGE FUNCTION ---
-    const sendMessage = (retryText = null) => {
-        const roomAtTimeOfSend = currentRoomID;
-        const textToSend = retryText !== null ? retryText : message;
-
-        if (textToSend.trim().length > 0) { // don't send empty messages
-            const messageId = generateUUID();
-            // the information stored locally
-            const messageData = {
-                id: messageId,
-                roomID: currentRoomID,
-                sender: name,
-                context: {
-                    text: textToSend.trim(),
-                    isEncrypted: false,
-                    version: "1.0"
-                },
-                color: selectedColor,
-                senderUUID: userUUID, // to identify own messages
-                isDM: !!isDirectMessage,
-                status: 'pending'
-            };
-
-            if (isDirectMessage) {
-                const recipientUUID = dmRoomID.split('_').find(id => id !== userUUID);
-                // the information sent out
-                secureEmit('send-direct-message', {
-                    id: messageId,
-                    recipientUUID,
-                    context: messageData.context,
-                });
-            } else {
-                secureEmit('send-message', {
-                    id: messageId,
-                    roomID: sessionId,
-                    context: messageData.context},
-                );
-            }
-
-            // update local state so sender sees message instantly
-            setAllMessages((prevMessages) => ({
-                ...prevMessages,
-                [currentRoomID]: [...(prevMessages[currentRoomID] || []), messageData]
-            }));
-
-            //  clear inputs and typing indicator only if not a retry
-            if (retryText === null) {
-                setMessage('');
-                if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-                secureEmit('stop-typing', { roomID: currentRoomID });
-                setIsTyping(false);
-            }
-
-            // set timer so messages not sent are flagged as failed after ten seconds
-            setTimeout(() => {
-                setAllMessages(prev => {
-                    const roomMsgs = prev[roomAtTimeOfSend] || [];
-                    return {
-                        ...prev,
-                        [roomAtTimeOfSend]: roomMsgs.map(m => 
-                            // If it's still pending after 10s, it failed
-                            (m.id === messageId && m.status === 'pending') 
-                            ? { ...m, status: 'failed' } 
-                            : m
-                        )
-                    };
-                });
-            }, 10000);
-        } 
-    };
-
-    // --- RESEND MESSAGE FEATURE ---
-    const resendMessage = (failedMsg) => {
-        // remove failed message from list
-        setAllMessages(prev => ({
-            ...prev,
-            [currentRoomID]: prev[currentRoomID].filter(m => m.id !== failedMsg.id)
-        }));
-        // try again
-        sendMessage(failedMsg.context.text);
-    };
-
-    // --- START PRIVATE CHAT ---
-    const startPrivateChat = (targetUser) => {
-        setIsSidebarVisible(false);
-        // create unique room id for both people
-        const generatedDmRoomId = [userUUID, targetUser.id].sort().join('_');
-        socket.emit('join-dm', { dmRoomID: generatedDmRoomId, targetName: targetUser.name });
-        navigation.navigate('Chat', {
-            isDirectMessage: true,
-            dmRoomID: generatedDmRoomId,
-            recipientName: targetUser.name,
-            recipientColor: targetUser.color
-        });
-    };
-
-    const handleTextChange = (text) => {
-        setMessage(text);
-
-        if (!isTyping) {
-            setIsTyping(true);
-            isTypingRef.current = true;
-            secureEmit('typing', { roomID: currentRoomID, name: name });
-        }
-        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-
-        typingTimeoutRef.current = setTimeout(() => {
-            secureEmit('stop-typing', { roomID: currentRoomID });
-            setIsTyping(false);
-        }, 2000);
-    };
-        
-    // --- LAYOUT ---
+    
+    // --- UI LAYOUT ---
     return (
         <View style={{ flex: 1, backgroundColor: '#f5f5f5' }}>
             {/* --- HEADER --- */}
@@ -277,7 +130,7 @@ export default function ChatScreen({ navigation, route }) {
             <View style={[styles.contentWrapper, { paddingHorizontal: 0, alignItems: 'stretch' }]}>
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 110 : 0}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight + tabBarHeight : 0}
                 style={{ flex: 1, backgroundColor: '#f5f5f5' }}
             >
 
@@ -285,62 +138,98 @@ export default function ChatScreen({ navigation, route }) {
                 <View style={{ flex: 1 }}>
                     <FlatList
                         ref={flatListRef}
-                        data={reverseMessages}
+                        data={messages || [] }
                         inverted
                         keyExtractor={(item) => item.id}      
                         contentContainerStyle={{ paddingHorizontal: 15, paddingBottom: 15 }}
-                        onContentSizeChange={() => flatListRef.current?.scrollToOffset({ offset: 0, animated: true })}                  
+                        onScroll={handleScroll}
+                        scrollEventThrottle={16}
                         removeClippedSubviews={Platform.OS === 'ios'}
-                        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-                        renderItem={({ item }) => {
-                            const isFailed = item.status === 'failed';
-                            const isPending = item.status === 'pending';
-
-                            return (
-                                <View style={[
-                                    styles.messageBubble,
-                                    item.senderUUID === userUUID ? styles.myMessage : styles.theirMessage,
-                                    isFailed && { opacity: 0.7, borderColor: 'red', borderWidth: 1 }
-                                ]}>
-                                    <Text style={{ fontWeight: 'bold', color: item.color, fontSize: 12 }}>
-                                        {item.sender} • { item.serverTimestamp
-                                            ? new Date(item.serverTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                                            : (item.senderUUID === userUUID) ? (isFailed ? "Failed" : "Sending...") : "Just now" }
-                                    </Text>
-                                    <Text style={{ fontSize: 16, marginTop: 5 }}>{item.context.text}</Text>
-                                    {isFailed && (
-                                        <Pressable onPress={() => resendMessage(item)}>
-                                            <Text style={{ color: 'red', fontWeight: 'bold', marginTop: 5 }}>Retry?</Text>
-                                        </Pressable>
-                                    )}
-                                </View>
-                            );
-                        }}
+                        keyboardShouldPersistTaps="handled"
+                        renderItem={renderMessage}
                     />
+
+                    {/* --- SCROLL TO BOTTOM BUTTON --- */}
+                    {!isAtBottom && reversedMessages.length > 0 && (
+                        <Pressable
+                            onPress={() => flatListRef.current?.scrollToOffset({ offset: 0, animated: true })}
+                            style={{
+                                position: 'absolute',
+                                bottom: 80,
+                                right: 20,
+                                backgroundColor: '#ffffff',
+                                width: 40,
+                                height: 40,
+                                borderRadius: 20,
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                elevation: 5,
+                                shadowColor: '#000',
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowOpacity: 0.2,
+                                shadowRadius: 3,
+                                zIndex: 10,
+                            }}
+                        >
+                            <Ionicons name="arrow-down" size={24} color="#007aff" />
+                        </Pressable>
+                    )}
 
                     {/* --- TYPING INDICATOR --- */}
                     <View style={{ height: 25, paddingHorizontal: 20, justifyContent: 'center' }}>
-                        {Object.values(typingUsers).length > 0 && (
+                        {Object.values(chat.typingUsers).length > 0 && (
                             <Text style={{ fontStyle: 'italic', color: '#888', fontSize: 12 }}>
-                                {Object.values(typingUsers).join(', ')} {Object.values(typingUsers).length > 1 ? 'are' : 'is'} typing...
+                                {Object.values(chat.typingUsers).join(', ')} {Object.values(chat.typingUsers).length > 1 ? 'are' : 'is'} typing...
                             </Text>
                         )}
                     </View>
 
+                    {/* --- SPAM WARNING --- */}
+                    <View style={{ height: 20, paddingHorizontal: 20, justifyContent: 'center' }}>
+                        {chat.spamWarning ? (
+                            <Text style={{ color: '#ff4444', fontSize: 12, fontWeight: 'bold' }}>
+                                {chat.spamWarning}
+                            </Text>
+                        ) : null}
+                    </View>
+
                     {/* --- INPUT BOX --- */}
                     <View style={styles.messageInputContainer}>
+                        {/* cancel edit button */}
+                        {chat.editingMessage && (
+                            <Pressable
+                                onPress={chat.cancelEditing}
+                                style={{ paddingHorizontal: 10, justifyContent: 'center' }}
+                            >
+                                <Ionicons name="close-circle" size={35} color="#ff3b30" />
+                            </Pressable>
+                        )}
                         <TextInput
-                            style={styles.messageInput}
-                            placeholder="Type a message..."
-                            value={message}
-                            onChangeText={handleTextChange}
-                            onSubmitEditing={() => sendMessage()}
+                            style={[
+                                styles.messageInput,
+                                chat.editingMessage && { borderColor: '#34C759', borderWidth: 1 }
+                            ]}
+                            placeholder={chat.editingMessage ? "Edit your message..." : "Type a message..."}                            
+                            value={chat.message}
+                            onChangeText={chat.handleTextChange}
+                            onSubmitEditing={() => chat.editingMessage ? chat.saveEdit() : chat.sendMessage()}
                             returnKeyType="send"
                             placeholderTextColor="#838181"
                             blurOnSubmit={false}
                         />
-                        <Pressable onPress={() => sendMessage()} style={styles.sendButton}>
-                            <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 18 }}>Send</Text>
+
+                        {/* send / save button */}
+                        <Pressable 
+                            onPress={() => chat.editingMessage ? chat.saveEdit() : chat.sendMessage()} 
+                            style={[
+                                styles.sendButton,
+                                chat.editingMessage && { backgroundColor: '#34C759'}
+                            ]}
+                            disabled={chat.message.trim().length === 0}
+                            >
+                            <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 18 }}>
+                                {chat.editingMessage ? "Save" : "Send"}
+                            </Text>
                         </Pressable>
                     </View>
                 </View>
@@ -350,69 +239,11 @@ export default function ChatScreen({ navigation, route }) {
             {/* end of content wrapper */}
         
             {/* --- SIDEBAR FOR USER LIST --- */}
-            <Modal
-                isVisible={isSidebarVisible}
-                onBackdropPress={() => setIsSidebarVisible(false)}
-                onBackButtonPress={() => setIsSidebarVisible(false)}
-                onSwipeComplete={() => setIsSidebarVisible(false)}
-                swipeDirection="right"
-                animationIn="slideInRight"
-                animationOut="slideOutRight"
-                animationOutTiming={300}
-                hideModalContentWhileAnimating={true}
-                swipeThreshold={50}
-                useNativeDriver={true}
-                useNativeDriverForBackdrop={true}
-                backdropTransitionOutTiming={0}
-                backdropColor='#f5f5f5'
-                style={{ margin: 0, justifyContent: 'flex-end', flexDirection: 'row' }}
-                backdropOpacity={0.3}
-            >
-                <View style={styles.sidebarContainer}>
-                    <View style={styles.sidebarHeader}>
-                        <Text style={styles.sidebarTitle}>Direct Messages</Text>
-                        <Pressable onPress={() => setIsSidebarVisible(false)}>
-                            <Text style={{ fontSize: 24, fontWeight: 'bold', padding: 10 }}>✕</Text>
-                        </Pressable>
-                    </View>
-                    <FlatList
-                        data={friends} // exclude self from user list
-                        keyExtractor={(item) => item.id}
-                        ListEmptyComponent={() => (
-                            <View style={{ marginTop: 20, alignItems: 'center' }}>
-                                <Text style={{ color: '#999', fontStyle: 'italic' }}>
-                                    No other users online right now.
-                                </Text>
-                            </View>
-                        )}
-                        renderItem={({ item }) => {
-                            const itemDmRoomId = [userUUID, item.id].sort().join('_');
-                            const isUnread = unreadRooms.includes(itemDmRoomId);
-
-                            return (
-                                <Pressable
-                                    onPress={() => startPrivateChat(item)}
-                                    style={[
-                                        styles.userItem,
-                                        {
-                                            borderLeftWidth: 4,
-                                            borderLeftColor: isUnread ? item.color : 'transparent',
-                                            backgroundColor: isUnread ? item.color + '20' : 'transparent',
-                                        }
-                                    ]}
-                                >
-                                    <View style={[styles.userDot, { backgroundColor: item.color, marginLeft: 5 }]} />
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={[styles.userName, isUnread && { fontWeight: 'bold' }]}>{item.name}</Text>
-                                    </View>
-                                    {isUnread ? (<Text style={{ color: item.color, fontWeight: 'bold', fontSize: 15}}>NEW   </Text>) :
-                                    (<Text style={{color: '#999'}}>Chat ➔</Text>)}
-                                </Pressable>
-                            );
-                        }}
-                    />
-                </View>
-            </Modal>
+            <Sidebar 
+                isVisible={isSidebarVisible} 
+                setIsSidebarVisible={setIsSidebarVisible} 
+                navigation={navigation} 
+            />
         </View>
     );
 }

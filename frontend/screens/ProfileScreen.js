@@ -194,6 +194,7 @@ export default function ProfileScreen({ navigation }) {
                             value={tempName}
                             onChangeText={setTempName}
                             autoFocus={false}
+                            maxLength={15}
                         />
                     </View>
                     {/* end of name input */}

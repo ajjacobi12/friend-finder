@@ -459,13 +459,16 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
         serverTimestamp: Date.now()
     });
 
-    socket.on('send-message', (messageData) => {
+    socket.on('send-message', (messageData, callback) => {
         const uuid = socketToUUID[socket.id];
         const sender = activeUsers[uuid];
         // console.log("data being sent: ", messageData);
 
         // validate the message, don't process empty data
-        if (!sender || !messageData.context?.text?.trim() ) return;
+        if (!sender || !messageData.context?.text?.trim() ) {
+            if (callback) callback({ success: false, message: "Invalid message data." });
+            return;
+        }
 
         const sanitizedContext = {
             ...messageData.context,
@@ -484,16 +487,20 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
 
         // broadcast to everyone in room
         io.to(messageData.roomID).emit('receive-message', outboundData);
+        if (callback) callback({ success: true, serverTimestamp: outboundData.serverTimestamp });
         console.log(`[CHAT] Room ${messageData.roomID} | ${sender.name}: ${outboundData.context.text}`);
         // console.log("data being sent to receive-message: ", outboundData);
     });
 
-    socket.on('send-direct-message', (messageData) => {
+    socket.on('send-direct-message', (messageData, callback) => {
         const uuid = socketToUUID[socket.id];
         const sender = activeUsers[uuid];
         const { recipientUUID, context } = messageData;
 
-        if (!sender || !context?.text?.trim() || !recipientUUID || !activeUsers[recipientUUID]) return;
+        if (!sender || !context?.text?.trim() || !recipientUUID || !activeUsers[recipientUUID]) {
+            if (callback) callback({ success: false, message: "Invalid message data or recipient doesn't exist." });
+            return;
+        }
 
         const sanitizedContext = {
             ...messageData.context,
@@ -511,8 +518,32 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
         );
 
         io.to(recipientUUID).emit('receive-message', outboundData);
-        socket.emit('receive-message', outboundData);
+        if (callback) callback({ success: true });
         console.log(`DM from ${sender.name} to ${recipientUUID}: ${context.text}`);
+    });
+
+    socket.on('edit-message', (data) => {
+        const { roomID, messageID, newText } = data;
+        if(!roomID || !messageID || !newText?.trim()) return;
+
+        io.to(roomID).emit('message-edited', {
+            roomID,
+            messageID,
+            newText: sanitize(newText.trim())
+        });
+        console.log(`[EDIT] Room ${roomID} | Message ${messageID} edited to: ${newText.trim()}`);
+    });
+
+    socket.on('delete-message', (data) => {
+        const { roomID, messageID, userName } = data;
+        if(!roomID || !messageID) return;
+
+        io.to(roomID).emit('message-deleted', {
+            roomID,
+            messageID,
+            userName,
+        });
+        console.log(`[DELETE] Room ${roomID} | Message ${messageID} deleted by ${userName}`);
     });
 
     socket.on('join-dm', ( {dmRoomID } ) => {
@@ -523,12 +554,13 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
 
     socket.on('typing', (data) => {
         const uuid = socketToUUID[socket.id];
+        const sender = activeUsers[uuid];
         if (!uuid) return;
 
         // data.roomID is either sessionId or dmRoomID
         socket.to(data.roomID).emit('user-typing', {
             roomID: data.roomID,
-            name: data.name,
+            name: sender.name, // use desanitized name
             id: uuid
         }); 
     });

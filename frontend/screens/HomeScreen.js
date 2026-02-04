@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'; // useState lets app remember things (eg. messages), useEffect allows app to perform actions (eg. connecting ot the server) as soon as it opens
-import { Text, View, StatusBar, Alert, FlatList, Pressable, ScrollView, 
-    Animated, Easing, BackHandler } from 'react-native'; // components; similar to HTML's tags <div> or <h1>, view = <div>, text for all strings
-import { useFocusEffect } from '@react-navigation/native';
+import React, { useCallback } from 'react'; // useState lets app remember things (eg. messages), useEffect allows app to perform actions (eg. connecting ot the server) as soon as it opens
+import { Text, View, StatusBar, Alert, FlatList, Pressable, Button } from 'react-native'; // components; similar to HTML's tags <div> or <h1>, view = <div>, text for all strings
 import { styles } from '../styles';
 import { useUser } from '../UserContext';
 import TextTicker from 'react-native-text-ticker';
 import { useSessionBackHandler } from '../hooks/useSessionBackHandler';
+import HomeUserItem from './components/HomeUserItem';
+import { useHomeLogic } from '../hooks/useHomeLogic';
+
 
 export default function HomeScreen({ navigation }) { 
     // defines the main component of the app "function App()" declares a function named App; "export default" makes this function available to be used by other files
@@ -15,57 +16,33 @@ export default function HomeScreen({ navigation }) {
     // ---- STATE VARIABLES -----
     // app memory (state) to store the server's message
     // whenever "set" function is called, React Native automatically re-renders (refreshes) the screen to show the new info
-    const {
-        name, selectedColor, socket, isConnected, sessionUsers, sessionId, secureEmit, 
-        handleCleanExit, isHost, onLeave, userUUID, friends
-    } = useUser();
+    const { name, selectedColor, sessionId, isHost, onLeave, friends, socket } = useUser(); // Added socket here for the hiccup test
+    const { endSessionForAll, removeUser, handleTransferHost } = useHomeLogic();  
 
     // takes care of android "back" button
     useSessionBackHandler(onLeave);
 
-    const removeUser = (sessionID, friend) => {
-        Alert.alert(
-            "Remove user?",
-            `Remove ${friend.name} from sessiion?`,
-            [
-                {text: "No", style: "cancel", onPress: () => console.log("Canceled remove user.") },
-                {text: "Yes", style: "destructive",
-                    onPress: () => { 
-                        secureEmit('remove-user', { roomID: sessionID, userUUIDToRemove: friend.id })
-                    }
-                }
-            ]
-        );
-    };
+    const renderFriend = useCallback(({ item }) => (
+        <HomeUserItem 
+            friend={item} 
+            isHost={isHost}
+            onTransfer={handleTransferHost}
+            onRemove={removeUser}
+        />
+    ), [isHost, handleTransferHost, removeUser]);
 
-    const endSessionForAll = () => {
-        Alert.alert(
-            "End session for all?",
-            "End session for all users?",
-            [
-                {text: "No", style: "cancel", 
-                    onPress: () => console.log(`Session ${sessionId} cancellation ended.`) },
-                {text: "Yes", style: "destructive", 
-                    onPress: () => { secureEmit('end-session', sessionId )}}
-            ]
-        );
-    };
+    const simulateNetworkHiccup = () => {
+        if (!socket) return;
+        console.log("--- Test Started: Socket Disconnecting ---");
+        // gives disconnect reason "transport close"
+        socket.io.engine.close();
+        socket.io.opts.reconnection = false;
 
-    const handleTransferHost = (sessionID, friend) => {
-        Alert.alert(
-            "Transfer host?",
-            `Make ${friend.name} the new host?`,
-            [
-                { text: "No", style: "cancel", 
-                    onPress: () => console.log(`Host transfer canceled.`) },
-                { text: "Yes", style: "destructive",
-                    onPress: () => secureEmit('transfer-host', { 
-                        roomID: sessionID, 
-                        newHostUUID: friend.id 
-                    })
-                }
-            ]
-        );
+        // Reconnect automatically after 5 seconds
+        setTimeout(() => {
+            console.log("--- Test Ending: Attempting Reconnect ---");
+            socket.connect();
+        }, 5000);
     };
 
     // "useEffect" is where "brains" of the app live, bridge between static UI and real-time world
@@ -85,11 +62,11 @@ export default function HomeScreen({ navigation }) {
                 {/* ---- LEAVE SESSION BUTTON ---- */}
                 <View style={{ width: 100, justifyContent: 'center' }}>
                     <Pressable 
-                        onPress={onLeave}  // () => means do this only when button is pressed
+                        onPress={onLeave} 
                         style={({ pressed }) => [
                             styles.headerButton, {
                                 backgroundColor: pressed ? '#ff3b3015' : '#ffffff', // Keep button white for contrast
-                                borderColor: pressed ? '#ff3b30' : '#ff3b301f', // Red edge
+                                borderColor: pressed ? '#ff3b30' : '#ff3b301f', 
                                 borderWidth: 1,                                
                                 // --- The "Red Glow" Shadow ---
                                 shadowColor: '#ff3b30', // Apple's standard red
@@ -139,6 +116,14 @@ export default function HomeScreen({ navigation }) {
                         {sessionId || "None"}
                     </Text>
                 </View>
+ 
+                {/* UNCOMMENT THIS TO TEST NETWORK DROPS
+                <View style={[styles.card, {width: '40%', backgroundColor: 'white', alignItems: 'center', padding: 10, marginTop: 20}]}> 
+                    <Button 
+                        title="Simulate Drop" 
+                        onPress={() => simulateNetworkHiccup()} 
+                    />
+                </View> */}
             
                 {/* --- USER LIST ----- */}
                 <View style={[styles.card, { paddingVertical: 15 }]}>
@@ -149,9 +134,17 @@ export default function HomeScreen({ navigation }) {
                             backgroundColor: selectedColor + '25', 
                             borderWidth: 3, 
                         }]}>
-                        <Text style={[styles.friendIdText, { fontSize: 20, fontWeight: 'bold', textAlignVertical: 'center', height: 50, lineHeight: 50  }]}>
+                        <TextTicker 
+                            duration={7000}
+                            loop bounce scroll={true}
+                            repeatSpacer={50}
+                            marqueeDelay={1000}
+                            style={[ styles.friendIdText, 
+                                { fontSize: 20, fontWeight: 'bold', textAlignVertical: 'center', height: 50, lineHeight: 50  }
+                                ]}
+                        >
                             {isHost ? '👑 ' : '⭐ '} { name || "Loading..."}
-                        </Text>
+                        </TextTicker>
                     </View>
                         
                     {/* --- DIVIDER ---- */}
@@ -167,64 +160,13 @@ export default function HomeScreen({ navigation }) {
                         maxHeight: 350 
                     }}>
                         <FlatList 
-                            data={friends}
+                            data={friends || []}
                             keyExtractor={(item) => item.id}
                             removeClippedSubviews={true}
                             initialNumToRender={8}
                             contentContainerStyle={{ paddingBottom: 10 }}
-
-                            renderItem={({ item: friend }) => (
-                                <View style={[
-                                    styles.friendBadge, { 
-                                        borderColor: friend.color || '#ccc', 
-                                        borderWidth: 2, 
-                                        paddingHorizontal: 10, 
-                                        overflow: 'hidden', 
-                                        marginTop: 10
-                                }]}>
-                                    <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', height: '100%' }}>
-                                        <Text style={{ fontSize: 17, fontFamily: 'Courier', includeFontPadding: false, textAlignVertical: 'center', height: 50, lineHeight: 50 }}>
-                                            {friend.isHost ? '👑 ' : '👤 '}
-                                        </Text>
-                                        <TextTicker 
-                                            key={isHost ? `host-view-${friend.id}` : `guest-view-${friend.id}`}
-                                            style={{ fontSize: 18, flex: 1, marginRight: 10, fontFamily: 'Courier', includeFontPadding: false, textAlignVertical: 'center', height: 50, lineHeight: 30 }}
-                                            duration={7000}
-                                            loop
-                                            bounce
-                                            repeatSpacer={50}
-                                            marqueeDelay={1000}
-                                            scroll={true}
-                                            shouldAnimateTreshold={10}
-                                            disabled={false}
-                                        >
-                                            {friend.name} 
-                                        </TextTicker>
-                                    </View>
-
-                                    {/* HOST TOOLS */}
-                                    {isHost && (
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', flexShrink: 0 }}>
-                                            <Pressable
-                                                onPress={() => handleTransferHost(sessionId, friend )}
-                                                style={{ marginLeft: 30 }}>
-                                                <Text style={{ fontSize: 20 }}>👑 </Text>
-                                            </Pressable>
-                                            <Pressable
-                                                onPress={() => removeUser(sessionId, friend )}
-                                                style={{ marginLeft: 10 }}>
-                                                <Text style={{ color: 'red', fontWeight: 'bold', fontSize: 17 }}>Remove</Text>
-                                            </Pressable>
-                                        </View>
-                                    )}
-                                </View>   
-                            )}
-
-                            ListEmptyComponent={()  => (
-                                <Text style={{ fontSize: 12, color: '#8e8e93', marginTop: 10, fontFamily: 'Courier' }}>No one else is here yet...</Text>  
-                            )}      
+                            renderItem={renderFriend}      
                         />
-                    {/* end of scrollable friend list container */}
                     </View>
                 {/* end of user list */}
                 </View>
