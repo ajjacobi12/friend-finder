@@ -1,19 +1,24 @@
+// loginscreen.js
 // ----- IMPORTS -------
-import React, { useState, useLayoutEffect, useRef } from 'react';
-import { View, Text, TextInput, StatusBar, Pressable, Animated, Dimensions, Platform, Keyboard, TouchableWithoutFeedback, PanResponder, Alert } from 'react-native';
-import { styles } from '../styles';
-import { useUser } from '../UserContext';
+import React, { useRef, useState } from 'react';
+import { View, Text, TextInput, StatusBar, Pressable, Animated, Dimensions, Keyboard, TouchableWithoutFeedback, PanResponder } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { styles } from '../styles/styles';
+import { useLoginLogic } from '../hooks/useLoginLogic';
 
 const { width } = Dimensions.get('window');
 
-
 export default function LoginScreen( { navigation }) {
-    const { setSessionId, secureEmit, setSessionUsers, setName, setSelectedColor, setHasRegistered, isConnected, setIsHost, justCreatedSession, userUUID, setUserUUID } = useUser();
-    const [tempCode, setTempCode] = useState(''); // tempCode holds what user is typing into textInput before hitting "join"
-    const [errorMsg, setErrorMsg]  = useState('');
     const [isJoinScreen, setIsJoinScreen] = useState(false);
-    const [loading, setLoading] = useState(false);
 
+    const {
+        tempCode, setTempCode,
+        errorMsg, setErrorMsg,
+        loading, createNewSession, joinSession
+    } = useLoginLogic({ navigation, isJoinScreen, hideJoinInput });
+        
+    const insets = useSafeAreaInsets();
     const slideAnim = useRef(new Animated.Value(0)).current;
 
     const panResponder = React.useMemo(() =>
@@ -50,87 +55,6 @@ export default function LoginScreen( { navigation }) {
             },
     }), [isJoinScreen]);
 
-    // ------ START NEW SESSION --------
-    const startNewSession = () => {
-        if (!isConnected){
-            Alert.alert("Connection Error", "Cannot create a new session while offline. Please check your internet connection and try again.");
-            return;
-        }
-        if (loading) return;
-        setLoading(true);
-        justCreatedSession.current = true;
-        // generate random 6 character key
-        const newId = Math.random().toString(36).substring(2, 8).toUpperCase();
-        // tell server to create and track this room
-        secureEmit('create-session', { roomID: newId, existingUUID: userUUID }, (response) => {
-            setLoading(false);
-            // update global context
-            if (response && response.userUUID) {
-                setUserUUID(response.userUUID);
-                setSessionId(newId);
-                setIsHost(true);
-                navigation.navigate('Profile'); // move to profile setup
-            }
-        });
-    };
-
-    // ------ JOIN EXISTING SESSION ------
-    // this is socket.io acknowledgement, it's asking a question and waiting for an answer
-    // response is a function that theserver executes once it finishes checking its database
-    const joinSession = () => {
-        if (!isConnected){
-            Alert.alert("Connection Error", "Cannot join a session while offline. Please check your internet connection and try again.");
-            return;
-        }
-        if (!tempCode || loading) return;
-        setLoading(true);
-        setErrorMsg("");
-
-        if (tempCode.length > 0) {
-            const code = tempCode.toUpperCase();
-            console.log("Sending join request for session:", code);
-
-            // ask the server "is this a real session?"
-            secureEmit('join-session', { roomID: code, existingUUID: userUUID }, (response) => {
-                setLoading(false);
-                // console.log("Server response for joining session:", response);
-
-                if (response && response.exists && !response.full) {           
-                    setErrorMsg("");    
-                    // update core session details     
-                    setUserUUID(response.userUUID);
-                    setSessionId(code);
-                    setIsHost(response.isHost || false);
-
-                    if (response.currentUsers) {
-                        setSessionUsers(response.currentUsers);
-                    }
-
-                    // redirect logic
-                    if (response.alreadyRegistered) {
-                        console.log("Re-entry detected. Restoring profile...");
-                        // synce data with stuff from server
-                        setName(response.userData.name);
-                        setSelectedColor(response.userData.color);
-                        setHasRegistered(true);
-                    } else {
-                        console.log("New user or unregistered. Navigating to profile...");
-                        navigation.navigate('Profile');
-                    }
-                } else if (response && response.exists && response.full) {
-                    setErrorMsg("Session is full!");
-                    setTimeout(() => {setErrorMsg("")}, 5000);
-                }       
-                else if (response && !response.exists){
-                    setErrorMsg("Session not found. Check the code!");
-                    setTimeout(() => {setErrorMsg("")}, 5000);
-                }
-            });
-        } else {
-            setLoading(false);
-        }
-    };
-
     // --- ANIMATION LOGIC ---
     const showJoinInput = () => {
         setIsJoinScreen(true);
@@ -153,6 +77,8 @@ export default function LoginScreen( { navigation }) {
             useNativeDriver: true,
         }).start();
     };
+
+    const isJoinDisabled = tempCode.trim().length === 0 || loading;
 
     // if (!isConnected) {
     //     return (
@@ -186,7 +112,7 @@ export default function LoginScreen( { navigation }) {
                     {/* new session button */}
                     <Pressable 
                         style={[styles.button, { width: '100%', height: 100, justifyContent: 'center', paddingHorizontal: 25}]} 
-                        onPress={startNewSession}
+                        onPress={createNewSession}
                         disabled={loading}
                     >
                         <Text style={[styles.buttonText, {fontSize: 40, textAlign: 'center' }]}>
@@ -207,18 +133,37 @@ export default function LoginScreen( { navigation }) {
                 </View>
                    
                 {/* ---- SCREEN 2: JOIN INPUT (RIGHT) ---- */}
-                <View style={{ width: width, flex: 1 }}>
-                    <View style={[styles.customHeader, { position: 'absolute', top: 50 }]}>
-                    {/* back button */}
-                        <Pressable 
-                            onPress={hideJoinInput}
-                            style={{ position: 'absolute', top: 0, left: 20, padding: 10}}
-                        >
-                            <Text style={{ color: '#007aff', fontSize: 20, fontWeight: 'bold' }}>Back</Text>
-                        </Pressable>
-                    </View>
+                <View style={{ width: width, flex: 1, alignItems: 'center' }}>
 
-                    <View style={[styles.contentWrapper, { flex: 1, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 270 }]}>
+                    {/* START HEADER */}
+                    <View style={[styles.customHeader, { height: 60 + insets.top, paddingTop: insets.top, width: width }]}>
+
+                        {/* LEFT SLOT */}
+                        <View style={{ flex: 1, alignItems: 'flex-start', justifyContent: 'center' }}>
+                            {/* back button */}
+                            <Pressable 
+                                onPress={hideJoinInput}
+                                style={({ pressed }) => [
+                                    styles.headerButton,
+                                    styles.headerButtonStandard,
+                                    { backgroundColor: pressed ? '#007aff15' : '#ffffff' }
+                                ]}
+                            >
+                                <Text style={{ color: '#007aff', fontSize: 20, fontWeight: 'bold' }}>❮ Back</Text>
+                            </Pressable>
+                        </View>  
+
+                        {/* CENTER SLOT */}
+                        <View style={styles.absoluteHeaderTitle}>
+                                <Text style={[styles.headerTitleText, { fontSize: 22 }]}>Join Session</Text>
+                        </View>
+
+                        {/* RIGHT SLOT */}
+                        <View style={{ flex: 1, alignItems: 'flex-end' }} />
+                    </View>
+                    {/* END HEADER */}
+
+                    <View style={[styles.contentWrapper, { flex: 1, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 230 }]}>
                         {/* error message display */}
                         {errorMsg !== "" && (
                             <Text style={{ color: 'red', fontWeight: 'bold', marginBottom: 10, fontSize: 16 }}>
@@ -255,11 +200,11 @@ export default function LoginScreen( { navigation }) {
                                 width: '50%',
                                 height: 80,
                                 justifyContent: 'center',
-                                opacity: loading ? 0.6 : 1,
+                                opacity: isJoinDisabled ? 0.6 : 1,
                                 paddingHorizontal: 20,
                                 paddingVertical: 0
                             }]} 
-                            disabled={loading}
+                            disabled={isJoinDisabled}
                             onPress={joinSession}
                         >
                             <View style={{ height: 60, justifyContent: 'center', alignItems: 'center' }}>

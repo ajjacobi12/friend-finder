@@ -82,31 +82,30 @@ export const styles = StyleSheet.create({
         fontWeight: 'bold',
     },
     customHeader: {
-        height: 110,
         backgroundColor: '#ffffff',
         flexDirection: 'row',
         justifyContent: 'space-between',
         width: '100%',
         borderColor: '#c1bcbce8',
         paddingHorizontal: 15,
-        paddingBottom: 0,
         elevation: 10,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.1,
         shadowRadius: 10,
+        alignItems: 'flex-end', 
+        paddingBottom: 10
     },
     absoluteHeaderTitle: {
         position: 'absolute',
-        top: 60,
+        bottom: 10,
         left: 0,
         right: 0,
-        height: 45,
+        height: 40,
         alignItems: 'center',
-        justifyContent: 'center'
+        justifyContent: 'center',
     },
     headerButton: {
-        marginTop: 50, // Matches your layout
         height: 45,
         paddingHorizontal: 12,
         borderRadius: 12,
@@ -117,6 +116,35 @@ export const styles = StyleSheet.create({
         minWidth: 80, // Ensures it doesn't get too tiny
         flexDirection: 'row',
     },
+    // The "Standard" (Blue/Black theme)
+    headerButtonStandard: {
+        backgroundColor: '#ffffff',
+        borderColor: 'rgba(0, 0, 0, 0.1)',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 5,
+        elevation: 8,
+    },
+    // Danger Variant (Unpressed)
+    headerButtonDanger: {
+        backgroundColor: '#ffffff',
+        borderColor: '#ff3b301f',
+        shadowColor: '#ff3b30',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 6,
+        elevation: 10,
+    },
+    // Danger Variant (Pressed)
+    headerButtonDangerPressed: {
+        backgroundColor: '#ff3b3015',
+        borderColor: '#ff3b30',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+        elevation: 2,
+    },
     headerButtonText: {
         color: 'black',
         fontSize: 13,
@@ -126,6 +154,7 @@ export const styles = StyleSheet.create({
     headerTitleText: {
         fontFamily: 'Courier',
         fontWeight: 'bold',
+        fontSize: 30,
     },
     
     // chat specific styles
@@ -228,6 +257,25 @@ export const styles = StyleSheet.create({
         // borderWidth: 2,
         // borderColor: '#ffffff'
     },
+    scrollToBottomButton: {
+        position: 'absolute',
+        bottom: 80,
+        right: 20,
+        backgroundColor: '#ffffff',
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        justifyContent: 'center',
+        alignItems: 'center',
+        elevation: 5,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 3,
+        zIndex: 10,
+    },
+
+
     // notifications
     notificationBar: {
         position: 'absolute',

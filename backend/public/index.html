@@ -23,7 +23,13 @@
         .btn-transfer { background: #f39c12; color: white; margin-left: 5px; }
         .btn-dm { background: #6f42c1; color: white; margin-left: 5px; }
 
-        /* --- New Styling for Editing/Deleting --- */
+        /* --- Color Picker Styles --- */
+        .color-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 10px; margin-bottom: 15px; }
+        .color-circle { width: 35px; height: 35px; border-radius: 50%; cursor: pointer; border: 3px solid transparent; transition: 0.1s; }
+        .color-circle:hover { transform: scale(1.1); }
+        .color-circle.selected { border-color: #333; box-shadow: 0 0 8px rgba(0,0,0,0.2); }
+
+        /* --- Chat Styles --- */
         .msg-actions { display: none; margin-top: 5px; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 4px; gap: 8px; }
         .my-msg:hover .msg-actions { display: flex; }
         .btn-msg-action { background: none; border: 1px solid white; color: white; padding: 2px 6px; font-size: 9px; opacity: 0.8; }
@@ -38,7 +44,6 @@
         .their-msg { align-self: flex-start !important; background-color: #e5e5ea !important; color: black !important; margin-right: auto !important; }
         .dm-msg { border: 2px solid #6f42c1; }
         
-        .msg-header { font-size: 11px; font-weight: bold; margin-bottom: 3px; display: block; }
         .typing-indicator { font-size: 12px; font-style: italic; color: #888; height: 20px; margin-bottom: 5px; }
         ul { list-style: none; padding: 0; }
         li { padding: 10px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
@@ -75,7 +80,15 @@
             <button onclick="exitDM()" style="background: white; color: #6f42c1; padding: 2px 8px;">Back to Room</button>
         </div>
 
-        <h3>Session: <span id="currentRoomDisplay"></span></h3>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3>Session: <span id="currentRoomDisplay"></span></h3>
+            <button style="background:#6c757d; color:white;" onclick="location.reload()">🚪 Leave</button>
+        </div>
+
+        <div class="card" style="border: 1px solid #eee; padding: 10px; border-radius: 8px; background: #fff; margin-bottom: 10px;">
+            <p style="margin: 0 0 5px 0; font-size: 12px; font-weight: bold; color: #555;">Your Color:</p>
+            <div id="roomColorGrid" class="color-grid"></div>
+        </div>
         
         <div id="chatArea"></div>
         <div id="typingArea" class="typing-indicator"></div>
@@ -92,13 +105,13 @@
 
         <p style="margin-top:20px;"><b>Active Users:</b></p>
         <ul id="userList"></ul>
-        <button style="width:100%; margin-top:15px; padding:10px; background:#6c757d; color:white;" onclick="location.reload()">🚪 Leave Session</button>
     </div>
 </div>
 
 <script>
     const socket = io();
-    const myBrowserColor = '#1e8fff';
+    const colorOptions = ['#a0220c', '#2e8b56', '#1e8fff', '#ffd900', '#8824ec', '#2ec4ff', '#ff9500', '#095517', '#ff00f7', '#091490', '#09f34f', '#ff0000'];
+    let myBrowserColor = '#1e8fff';
     
     let myUUID = localStorage.getItem('browser_uuid');
     if (!myUUID) {
@@ -111,14 +124,41 @@
     let activeDM = null; 
     let amIHost = false;
     let typingTimeout = null;
-    let editingMsgID = null; // Track if we are currently editing
+    let editingMsgID = null;
 
+    // --- COLOR PICKER ---
+    function renderColorPicker() {
+        const grid = document.getElementById('roomColorGrid');
+        grid.innerHTML = '';
+        colorOptions.forEach(color => {
+            const circle = document.createElement('div');
+            circle.className = `color-circle ${color === myBrowserColor ? 'selected' : ''}`;
+            circle.style.backgroundColor = color;
+            circle.onclick = () => {
+                myBrowserColor = color;
+                renderColorPicker(); 
+                syncUserUpdate();
+            };
+            grid.appendChild(circle);
+        });
+    }
+
+    function syncUserUpdate() {
+        if (!myCurrentRoom) return;
+        socket.emit('update-user', { 
+            name: document.getElementById('nameInput').value, 
+            uuid: myUUID, 
+            sessionId: myCurrentRoom,
+            color: myBrowserColor
+        });
+    }
+
+    // --- SOCKET LISTENERS ---
     socket.on('connect', () => {
-        document.getElementById('status').innerText = "Connected: " + socket.id;
+        document.getElementById('status').innerText = "Connected";
         document.getElementById('status').className = "status online";
     });
 
-    // --- NEW: LISTENERS FOR EDITS/DELETES ---
     socket.on('message-edited', (data) => {
         const msgElement = document.querySelector(`[data-msg-id="${data.messageID}"]`);
         if (msgElement) {
@@ -136,29 +176,18 @@
     socket.on('message-deleted', (data) => {
         const msgElement = document.querySelector(`[data-msg-id="${data.messageID}"]`);
         if (msgElement) {
-            // Keep the original alignment classes (my-msg or their-msg)
-            // Just clear the inner content
-            msgElement.innerHTML = `
-                <span class="deleted-msg">${data.userName} deleted this message.</span>
-            `;
-            
-            // Remove the action buttons so you can't edit a deleted message
-            const actions = msgElement.querySelector('.msg-actions');
-            if (actions) actions.remove();
+            msgElement.innerHTML = `<span class="deleted-msg">${data.userName} deleted this message.</span>`;
+            if (msgElement.querySelector('.msg-actions')) msgElement.querySelector('.msg-actions').remove();
         }
     });
 
     socket.on('receive-message', (data) => {
         const isMe = data.senderUUID === myUUID;
         if (isMe) return;
-
         const isDM = data.isDirectMessage === true || data.roomID.includes('_');
-
         if (isDM) {
             if (!activeDM) enterDM(data.senderUUID, data.sender);
-            if (data.roomID === activeDM?.roomID) {
-                displayMessage(data, false, true);
-            }
+            if (data.roomID === activeDM?.roomID) displayMessage(data, false, true);
         } else if (data.roomID === myCurrentRoom && !activeDM) {
             displayMessage(data, false, false);
         }
@@ -166,29 +195,35 @@
 
     socket.on('user-typing', (data) => {
         if (data.roomID === (activeDM ? activeDM.roomID : myCurrentRoom)) {
-            if (data.id !== socket.id) {
-                document.getElementById('typingArea').innerText = `${data.name} is typing...`;
-            }
+            if (data.id !== socket.id) document.getElementById('typingArea').innerText = `${data.name} is typing...`;
         }
     });
 
-    socket.on('user-stop-typing', (data) => {
-        document.getElementById('typingArea').innerText = '';
-    });
+    socket.on('user-stop-typing', () => document.getElementById('typingArea').innerText = '');
 
-    socket.on('host-change', (newHostId) => {
-        amIHost = (myUUID === newHostId);
-    });
+    socket.on('host-change', (newHostId) => { amIHost = (myUUID === newHostId); });
 
     socket.on('user-update', (users) => {
         const list = document.getElementById('userList');
         list.innerHTML = '';
+
+        // 1. Reset (Corrected Casing)
+        amIHost = false; 
+
+        // 2. Find "Me" first to set the host flag correctly for this render cycle
+        const me = users.find(u => u.id === myUUID);
+        if (me && me.isHost) amIHost = true;
+
+        // 3. Now render everyone
         users.forEach(u => {
             const isMe = u.id === myUUID; 
-            const li = document.createElement('li');
             
+            const li = document.createElement('li');
             li.innerHTML = `
-                <div>${u.isHost ? '<span class="crown">👑</span>' : ''} ${u.name} ${isMe ? '<i>(You)</i>' : ''}</div>
+                <div style="display:flex; align-items:center;">
+                    <div style="width:12px; height:12px; border-radius:50%; background:${u.color}; margin-right:8px; border:1px solid #ccc;"></div>
+                    ${u.isHost ? '<span class="crown">👑</span>' : ''} ${u.name} ${isMe ? '<i>(You)</i>' : ''}
+                </div>
                 <div>
                     ${!isMe ? `<button class="btn-dm" onclick="enterDM('${u.id}', '${u.name}')">DM</button>` : ''}
                     ${amIHost && !isMe ? `
@@ -201,11 +236,9 @@
         });
     });
 
-    socket.on('removed-from-session', () => {
-        alert("You have been removed from the session.");
-        location.reload();
-    });
+    socket.on('removed-from-session', () => { alert("Removed from session."); location.reload(); });
 
+    // --- ACTIONS ---
     function createSession() {
         const roomID = document.getElementById('createIdInput').value.toUpperCase();
         if (!roomID) return;
@@ -226,19 +259,8 @@
         document.getElementById('setupArea').style.display = 'none';
         document.getElementById('roomArea').style.display = 'block';
         document.getElementById('currentRoomDisplay').innerText = roomID;
-        const myName = document.getElementById('nameInput').value;
-
-        socket.emit('update-user', { 
-            name: myName, 
-            uuid: myUUID, 
-            sessionId: roomID,
-            color: myBrowserColor,
-        }, (response) => {
-            if (response && response.uuid) {
-                myUUID = response.uuid;
-                document.getElementById('uuidDisplay').innerText = myUUID;
-            }
-        });
+        renderColorPicker();
+        syncUserUpdate();
     }
 
     function enterDM(targetUUID, targetName) {
@@ -248,7 +270,6 @@
         document.getElementById('dmIndicator').style.display = 'flex';
         document.getElementById('dmTargetName').innerText = targetName;
         document.getElementById('chatArea').innerHTML = ''; 
-        document.getElementById('typingArea').innerText = '';
     }
 
     function exitDM() {
@@ -258,18 +279,13 @@
     }
 
     function handleTyping() {
-        socket.emit('typing', { 
-            roomID: activeDM ? activeDM.roomID : myCurrentRoom, 
-            name: document.getElementById('nameInput').value 
-        });
-
+        socket.emit('typing', { roomID: activeDM ? activeDM.roomID : myCurrentRoom, name: document.getElementById('nameInput').value });
         clearTimeout(typingTimeout);
         typingTimeout = setTimeout(() => {
             socket.emit('stop-typing', { roomID: activeDM ? activeDM.roomID : myCurrentRoom });
         }, 2000);
     }
 
-    // --- UPDATED SEND LOGIC (Supports Editing) ---
     function sendChat() {
         const input = document.getElementById('chatInput');
         const text = input.value.trim();
@@ -277,62 +293,35 @@
         if (!text) return;
 
         if (editingMsgID) {
-            // Emit edit event
-            socket.emit('edit-message', {
-                roomID: activeDM ? activeDM.roomID : myCurrentRoom,
-                messageID: editingMsgID,
-                newText: text
-            });
-            // Update UI locally
+            socket.emit('edit-message', { roomID: activeDM ? activeDM.roomID : myCurrentRoom, messageID: editingMsgID, newText: text });
             const msgEl = document.querySelector(`[data-msg-id="${editingMsgID}"]`);
             if (msgEl) {
                 msgEl.querySelector('.msg-text').innerText = text;
                 if (!msgEl.querySelector('.edited-indicator')) {
                     const span = document.createElement('span');
-                    span.className = 'edited-indicator';
-                    span.innerText = ' (edited)';
+                    span.className = 'edited-indicator'; span.innerText = ' (edited)';
                     msgEl.querySelector('.msg-text').appendChild(span);
                 }
             }
             cancelEdit();
         } else {
-            // Standard message logic
             const messageData = {
                 id: 'msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
                 roomID: activeDM ? activeDM.roomID : myCurrentRoom,
-                sender: myName,
-                senderUUID: myUUID,
-                context: { text: text },
-                color: myBrowserColor,
-                serverTimestamp: Date.now(),
-                isDM: !!activeDM
+                sender: myName, senderUUID: myUUID, context: { text: text },
+                color: myBrowserColor, serverTimestamp: Date.now(), isDM: !!activeDM
             };
-
             if (activeDM) {
-                socket.emit('send-direct-message', {
-                    id: messageData.id,
-                    recipientUUID: activeDM.uuid,
-                    context: messageData.context,
-                    senderUUID: myUUID,
-                    fromName: myName
-                });
+                socket.emit('send-direct-message', { id: messageData.id, recipientUUID: activeDM.uuid, context: messageData.context, senderUUID: myUUID, fromName: myName });
             } else {
-                socket.emit('send-message', {
-                    id: messageData.id,
-                    roomID: myCurrentRoom,
-                    context: messageData.context,
-                    senderUUID: myUUID,
-                    sender: myName
-                });
+                socket.emit('send-message', { id: messageData.id, roomID: myCurrentRoom, context: messageData.context, senderUUID: myUUID, sender: myName });
             }
             displayMessage(messageData, true, !!activeDM);
         }
-
         input.value = '';
         socket.emit('stop-typing', { roomID: activeDM ? activeDM.roomID : myCurrentRoom });
     }
 
-    // --- NEW: EDIT/DELETE HANDLERS ---
     function prepareEdit(msgID, currentText) {
         editingMsgID = msgID;
         document.getElementById('chatInput').value = currentText;
@@ -350,58 +339,35 @@
 
     function confirmDelete(msgID) {
         if (confirm("Delete this message?")) {
-            socket.emit('delete-message', {
-                roomID: activeDM ? activeDM.roomID : myCurrentRoom,
-                messageID: msgID,
-                userName: document.getElementById('nameInput').value
-            });
-            
+            socket.emit('delete-message', { roomID: activeDM ? activeDM.roomID : myCurrentRoom, messageID: msgID, userName: document.getElementById('nameInput').value });
             const msgEl = document.querySelector(`[data-msg-id="${msgID}"]`);
             if (msgEl) {
-                // We keep 'my-msg' class so it stays on the right
                 msgEl.innerHTML = `<span class="deleted-msg">You deleted this message.</span>`;
-                // Optional: reduce opacity to make it look "gone"
                 msgEl.style.opacity = "0.6";
             }
         }
     }
-    
-    function transferHost(targetId) {
-        if(confirm("Promote this user to host?")) {
-            socket.emit('transfer-host', { roomID: myCurrentRoom, newHostUUID: targetId });
-        }
-    }
 
-    function removeUser(targetId) {
-        if(confirm("Remove this user from the session?")) {
-            socket.emit('remove-user', { roomID: myCurrentRoom, userUUIDToRemove: targetId });
-        }
-    }
+    function transferHost(targetId) { if(confirm("Promote user to host?")) socket.emit('transfer-host', { roomID: myCurrentRoom, newHostUUID: targetId }); }
+    function removeUser(targetId) { if(confirm("Kick user?")) socket.emit('remove-user', { roomID: myCurrentRoom, userUUIDToRemove: targetId }); }
 
     function displayMessage(data, amISender, isDM) {
         const chatArea = document.getElementById('chatArea');
         if (data.id && document.querySelector(`[data-msg-id="${data.id}"]`)) return;
-
         const div = document.createElement('div');
         div.className = `msg ${amISender ? 'my-msg' : 'their-msg'} ${isDM ? 'dm-msg' : ''}`;
         if (data.id) div.setAttribute('data-msg-id', data.id);
-        
-        const messageText = data.context?.text || data.text || "...";
-        const senderName = amISender ? "You" : data.sender;
-        
+        const text = data.context?.text || data.text || "...";
         div.innerHTML = `
-            <span style="font-size: 10px; font-weight: bold; margin-bottom: 2px; opacity: 0.8;">
-                ${isDM ? '🔒 ' : ''}${senderName}
-            </span>
-            <div class="msg-text">${messageText}</div>
+            <span style="font-size: 10px; font-weight: bold; margin-bottom: 2px; opacity: 0.8;">${isDM ? '🔒 ' : ''}${amISender ? 'You' : data.sender}</span>
+            <div class="msg-text">${text}</div>
             ${amISender ? `
                 <div class="msg-actions">
-                    <button class="btn-msg-action" onclick="prepareEdit('${data.id}', '${messageText.replace(/'/g, "\\'")}')">Edit</button>
+                    <button class="btn-msg-action" onclick="prepareEdit('${data.id}', '${text.replace(/'/g, "\\'")}')">Edit</button>
                     <button class="btn-msg-action" onclick="confirmDelete('${data.id}')">Delete</button>
                 </div>
             ` : ''}
         `;
-        
         chatArea.appendChild(div);
         chatArea.scrollTop = chatArea.scrollHeight;
     }

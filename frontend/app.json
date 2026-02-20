@@ -11,6 +11,10 @@
     },
     "ios": {
       "backgroundColor": "#ffffff"
-    }
+    },
+    "plugins": [
+      "expo-font",
+      "expo-audio"
+    ]
   }
 }

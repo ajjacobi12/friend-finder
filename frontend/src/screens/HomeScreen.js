@@ -1,12 +1,14 @@
-import React, { useCallback } from 'react'; // useState lets app remember things (eg. messages), useEffect allows app to perform actions (eg. connecting ot the server) as soon as it opens
-import { Text, View, StatusBar, Alert, FlatList, Pressable, Button } from 'react-native'; // components; similar to HTML's tags <div> or <h1>, view = <div>, text for all strings
-import { styles } from '../styles';
-import { useUser } from '../UserContext';
+// HomeScreen.js
+import React, { useState, useCallback } from 'react'; // useState lets app remember things (eg. messages), useEffect allows app to perform actions (eg. connecting ot the server) as soon as it opens
+import { Text, View, StatusBar, FlatList, Pressable, Button } from 'react-native'; // components; similar to HTML's tags <div> or <h1>, view = <div>, text for all strings
 import TextTicker from 'react-native-text-ticker';
-import { useSessionBackHandler } from '../hooks/useSessionBackHandler';
-import HomeUserItem from './components/HomeUserItem';
-import { useHomeLogic } from '../hooks/useHomeLogic';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import HomeUserItem from '../components/home/HomeUserItem';
+import HostTransferModal from '../components/home/HostTransferModal';
+import { useHomeLogic } from '../hooks/useHomeLogic';
+import { styles } from '../styles/styles';
+import { useUser } from '../context/UserContext';
 
 export default function HomeScreen({ navigation }) { 
     // defines the main component of the app "function App()" declares a function named App; "export default" makes this function available to be used by other files
@@ -16,11 +18,11 @@ export default function HomeScreen({ navigation }) {
     // ---- STATE VARIABLES -----
     // app memory (state) to store the server's message
     // whenever "set" function is called, React Native automatically re-renders (refreshes) the screen to show the new info
-    const { name, selectedColor, sessionId, isHost, onLeave, friends, socket } = useUser(); // Added socket here for the hiccup test
-    const { endSessionForAll, removeUser, handleTransferHost } = useHomeLogic();  
+    const { name, selectedColor, sessionId, isHost, friends, socket, handleCleanExit } = useUser(); // Added socket here for the hiccup test
+    const { endSessionForAll, removeUser, handleTransferHost, leaveSession, leaveSessionAction } = useHomeLogic();  
+    const [showTransfer, setShowTransfer] = useState(false);
 
-    // takes care of android "back" button
-    useSessionBackHandler(onLeave);
+    const insets = useSafeAreaInsets();
 
     const renderFriend = useCallback(({ item }) => (
         <HomeUserItem 
@@ -57,56 +59,43 @@ export default function HomeScreen({ navigation }) {
         <View style={styles.container}>
             <StatusBar barStyle="dark-content" />
 
-            {/* ---- CUSTOM HEADER ---- */}
-            <View style={styles.customHeader}>
-                {/* ---- LEAVE SESSION BUTTON ---- */}
+            {/* ---- START HEADER ---- */}
+            <View style={[styles.customHeader, { height: 60 + insets.top, paddingTop: insets.top }]}>
+
+                {/* ---- LEFT SLOT: LEAVE SESSION BUTTON,  ---- */}
                 <View style={{ width: 100, justifyContent: 'center' }}>
                     <Pressable 
-                        onPress={onLeave} 
+                        onPress={() => leaveSession(() => setShowTransfer(true))} 
                         style={({ pressed }) => [
-                            styles.headerButton, {
-                                backgroundColor: pressed ? '#ff3b3015' : '#ffffff', // Keep button white for contrast
-                                borderColor: pressed ? '#ff3b30' : '#ff3b301f', 
-                                borderWidth: 1,                                
-                                // --- The "Red Glow" Shadow ---
-                                shadowColor: '#ff3b30', // Apple's standard red
-                                shadowOffset: { width: 0, height: pressed ? 1 : 3 },
-                                shadowOpacity: pressed ? 0.2 : 0.3,
-                                shadowRadius: pressed ? 2 : 6,
-                                elevation: pressed ? 2 : 10,                               
-                            }
+                            styles.headerButton,
+                            styles.headerButtonDanger,
+                            pressed && styles.headerButtonDangerPressed
                         ]}>
                         <Text style={{ color: 'black', fontWeight: 'bold', fontSize: 15, textAlign: 'center'}}>{"Leave"}{"\n"}{"Session"}</Text>
                     </Pressable>
                 </View>
                 
+                {/* CENTER SLOT */}
                 <View style={styles.absoluteHeaderTitle}>
-                    <Text style={[ styles.headerTitleText, { fontSize: 30 }]}>Lobby</Text>
+                    <Text style={ styles.headerTitleText }>Lobby</Text>
                 </View>
 
-                {/* ---- END SESSION FOR ALL BUTTON ---- */}
+                {/* ---- RIGHT SLOT: END SESSION FOR ALL BUTTON ---- */}
                 <View style={{ flex: 1, alignItems: 'flex-end', justifyContent: 'center'}}>
                     {isHost && (
                     <Pressable 
                         onPress={endSessionForAll}  // () => means do this only when button is pressed
                         style={({ pressed }) => [
-                            styles.headerButton, {
-                                backgroundColor: pressed ? '#ff3b3015' : '#ffffff', // Keep button white for contrast
-                                borderColor: pressed ? '#ff3b30' : '#ff3b301f', // Red edge
-                                borderWidth: 1,                                
-                                // --- The "Red Glow" Shadow ---
-                                shadowColor: '#ff3b30', // Apple's standard red
-                                shadowOffset: { width: 0, height: pressed ? 1 : 4 },
-                                shadowOpacity: pressed ? 0.2 : 0.3,
-                                shadowRadius: pressed ? 2 : 6,
-                                elevation: pressed ? 2 : 10,    
-                            }
+                            styles.headerButton, 
+                            styles.headerButtonDanger,
+                            pressed && styles.headerButtonDangerPressed
                         ]}>
                         <Text style={{ color: 'black', fontWeight: 'bold', fontSize: 15, textAlign: 'center'}}>{"End Session"}{"\n"}{"For All"}</Text>
                     </Pressable>
                     )}
                 </View>
             </View>
+            {/* END HEADER */}
 
             <View style={styles.contentWrapper}>
                 {/* --- SESSION ID ---- */}
@@ -161,7 +150,7 @@ export default function HomeScreen({ navigation }) {
                     }}>
                         <FlatList 
                             data={friends || []}
-                            keyExtractor={(item) => item.id}
+                            keyExtractor={(item) => item.uuid}
                             removeClippedSubviews={true}
                             initialNumToRender={8}
                             contentContainerStyle={{ paddingBottom: 10 }}
@@ -172,6 +161,26 @@ export default function HomeScreen({ navigation }) {
                 </View>
             {/* end of content wrapper */}
             </View>
+
+            {/* host transfer modal */}
+            <HostTransferModal
+                visible={showTransfer}
+                onClose={() => setShowTransfer(false)}
+                friends={friends}
+                onTransfer={async (selectedFriend) => {
+                    const confirmed = await handleTransferHost(selectedFriend);
+                    if (confirmed) {
+                        try {
+                            await leaveSessionAction(sessionId);
+                            setShowTransfer(false);
+                            handleCleanExit();
+                        } catch (err) {
+                            Alert.alert("Transfer failed", err.message);
+                        }
+                    }
+                }}
+            />
+
         </View>
     );
 }

@@ -1,12 +1,13 @@
-// app's long-term memory and its connection to the outside world (the socket)
+// UserContext.js
 
 // ---- IMPORTS -----
 import React, { useState, createContext, useContext, useEffect, useCallback, useRef } from 'react';
 import { Alert, TouchableOpacity, View, Text, Animated, PanResponder, ActivityIndicator } from 'react-native';
-import socket from './socket';
-import { Audio } from 'expo-av';
-import { navigationRef } from './navigationService';
-import { styles } from './styles';
+import { useAudioPlayer } from 'expo-audio';
+
+import socket from '../services/socketServices';
+import { navigationRef } from '../services/navigationService';
+import { styles } from '../styles/styles';
 
 // create context object (empty container) to hold global data
 const UserContext = createContext();
@@ -41,6 +42,9 @@ export const UserProvider = ({ children }) => {
     const sessionIdRef = useRef(sessionId);
     const isHostRef = useRef(isHost);
 
+    const audioSource = require('../../assets/ding.mp3');
+    const player = useAudioPlayer(audioSource);
+
     // keep a ref to the latest sessionId for cleanup on disconnect
     useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
     useEffect(() => { isHostRef.current = isHost; }, [isHost]);
@@ -60,33 +64,6 @@ export const UserProvider = ({ children }) => {
         setIsHost(false);
         setHasRegistered(false);
     }, []);
-
-        // --- SECURE MESSAGING ---
-    const secureEmit = (eventName, data, callback) => {
-        // these events are "public" because the server needs to read the data to manage 
-        // rooms and identify users
-        const infrastructureEvents = [
-            'join-session', 
-            'create-session', 
-            'update-user', 
-            'leave-session',
-            'send-message',
-            'send-direct-message',
-            'join-dm',
-            'transfer-host',
-            'remove-user',
-            'end-session',
-            'edit-message',
-            'delete-message'
-        ];
-
-        if (infrastructureEvents.includes(eventName)) {
-            socket.emit(eventName, data, callback);
-        } else {
-            // future encryption here
-            socket.emit(eventName, data, callback);
-        }
-    };  
 
     // --- SHOW NOTIFICATION FUNCTION ---
     const showNotification = useCallback((data) => {
@@ -150,50 +127,6 @@ export const UserProvider = ({ children }) => {
         setUnreadRooms(prev => prev.filter(id => id !== roomID));
     }, []);
 
-    // --- VOLUNTARILY LEAVING A SESSION ---
-    const onLeave = () => {
-        if (isHost && friends.length > 1) {
-        // if host is leaving but there are 2 or more other users, require transfer of ownership first
-        Alert.alert(
-            "Host transfer required.",
-            "You are the host! Please transfer ownership before leaving the session.",
-            [{ text: "OK", style: "cancel" }]
-        );
-        } else if (isHost && friends.length === 1) { // only one other user, auto-transfer host 
-            Alert.alert(
-                "Confirm Leave?",
-                "Are you sure you'd like to leave the session?",
-                [{ text: "No", style: "cancel" }, 
-                 { text: "Yes", onPress: () => {
-                        secureEmit('transfer-host', { 
-                            roomID: sessionId, 
-                            newHostUUID: friends[0].id 
-                        }, (response) => {
-                            if (response && response.success) {
-                                secureEmit('leave-session', sessionId);
-                                handleCleanExit();
-                            } else {
-                                Alert.alert("Transfer failed.", "Could not transfer host. Please try again.");
-                            }
-                        });
-                     }
-                  }]
-            );
-        } else { // if no one else is in the session or user is not host, just leave
-            Alert.alert(
-                "Are you sure?",
-                "Are you sure you'd like to leave the session?",
-                [{ text: "No", style: "cancel" }, 
-                 { text: "Yes", style: "destructive",
-                    onPress: () => {
-                        secureEmit('leave-session', sessionId);
-                        handleCleanExit();
-                    }
-                  }]
-            );
-        }
-    };
-
     // --- DESANITIZE INCOMING TEXT ---
     const desanitize = (text) => {
         if (typeof text !== 'string') return '';
@@ -226,17 +159,11 @@ export const UserProvider = ({ children }) => {
     // if is sent then play sound and update user list
     useEffect(() => {
         // sound stuff
-        const playJoinSound = async () => {
-            try {
-                const { sound } = await Audio.Sound.createAsync(require('./assets/ding.mp3'));
-                await sound.playAsync();
-                // unload sound after playing to save memory
-                sound.setOnPlaybackStatusUpdate((status) => {
-                if (status.didJustFinish) sound.unloadAsync();
-                });
-            } catch (error) {
-                console.log("Error playing sound:", error);
+        const playJoinSound = () => {
+            if (player.playing) {
+                player.seekTo(0); // restart sound if already playing
             }
+            player.play();
         };
 
         // --- HANDLERS ---
@@ -400,6 +327,20 @@ export const UserProvider = ({ children }) => {
             }
         };
 
+        const handleDeletedByOthers = ( data ) => {  
+            updateLocalMessage(data.roomID, data.msgID, {
+                isDeleted: true,
+                newText: `${desanitize(data.senderName)} removed this message.`
+            });
+        };
+
+        const handleEditedByOthers = ( data ) => {
+            updateLocalMessage(data.roomID, data.msgID, { 
+                isEdited: true,
+                newText: desanitize(data.newText)  
+            });
+        };
+
         const onSessionEnded = () => {
             if (!isHostRef.current) Alert.alert("The host has ended the session.");
             handleCleanExit();
@@ -430,6 +371,8 @@ export const UserProvider = ({ children }) => {
         socket.on('disconnect', onDisconnect);
         socket.on('user-update', onUserUpdate);
         socket.on('receive-message', onReceiveMessage);
+        socket.on('message-deleted', handleDeletedByOthers);
+        socket.on('message-edited', handleEditedByOthers);
         socket.on('session-ended', onSessionEnded);
         socket.on('removed-from-session', onRemoved);
         socket.on('host-change', onHostChange);
@@ -440,6 +383,8 @@ export const UserProvider = ({ children }) => {
             socket.off('disconnect', onDisconnect);
             socket.off('user-update', onUserUpdate);
             socket.off('receive-message', onReceiveMessage);
+            socket.off('message-deleted', handleDeletedByOthers);
+            socket.off('message-edited', handleEditedByOthers);
             socket.off('session-ended', onSessionEnded);
             socket.off('removed-from-session', onRemoved);
             socket.off('host-change', onHostChange);
@@ -449,9 +394,9 @@ export const UserProvider = ({ children }) => {
     return (
         <UserContext.Provider value={{
             name, setName, selectedColor, setSelectedColor, hasRegistered, 
-            setHasRegistered, socket, isConnected, sessionId, setSessionId, sessionUsers, setSessionUsers, secureEmit,
+            setHasRegistered, socket, isConnected, sessionId, setSessionId, sessionUsers, setSessionUsers,
             handleCleanExit, isHost, setIsHost, allMessages, setAllMessages, justCreatedSession, userUUID, setUserUUID,
-            onLeave, unreadRooms, setUnreadRooms, markAsRead, friends, setFriends, desanitize, isReconnecting
+            unreadRooms, setUnreadRooms, markAsRead, friends, setFriends, desanitize, isReconnecting
         }}>
             {children}
 
@@ -473,7 +418,7 @@ export const UserProvider = ({ children }) => {
                                 if (roomID)    {
                                     navigationRef.navigate('Chat', { 
                                         isDirectMessage: isDM,
-                                        dmRoomID: isDM ? roomID : null,
+                                        DMroomID: isDM ? roomID : null,
                                         recipientName: isDM ? title.replace('👤 ', '').replace('💬 ', '') : undefined,
                                     });
                                 }

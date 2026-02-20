@@ -18,7 +18,7 @@ const crypto = require('crypto');
 app.use(express.static('public')); // tells Express, "if anyoneasks for a file (eg. image, CSS file, or html page), look inside a folder named public". This is howto "serve" the frontend code to the user's browser
 
 // object to store users { "socketID", name: ...,  color: ..., isHost: ...}
-const activeUsers = {}; // key: UUID, value: {name, color, socketid, etc.}
+const activeUsers = {}; // key: , value: {name, color, socketID, etc.}
 const socketToUUID = {}; // key: socketID, value: UUID (for quick lookup)
 
 // tracks active room IDs
@@ -27,10 +27,12 @@ const activeSessions = {};
 // tracking "deletion tickets" to stop countdown before server deletion
 const roomTimeoutRefs = {};
 
+const maxSessionCapacity = 12;
+
 // helper to broadcast to everyone in a room to update their UI
 const broadcastUpdate = (roomID, logMessage) => {
     if (!roomID) return;
-    const usersInRoom = Object.values(activeUsers).filter(u => u.sessionId === roomID);
+    const usersInRoom = Object.values(activeUsers).filter(u => u.sessionID === roomID);
     io.to(roomID).emit('user-update', usersInRoom);
 
     console.log(`--- ROOM UPDATE: ${roomID} ----`);
@@ -38,6 +40,19 @@ const broadcastUpdate = (roomID, logMessage) => {
     console.log(`Current Active Users: ${usersInRoom.length}`);
     console.log(JSON.stringify(usersInRoom, null, 2));
     console.log('------------------------------');
+};
+
+// generates roomID
+const generateUniqueCode = () => {
+    let code;
+    let isUnique = false;
+    while (!isUnique) {
+        code = Math.random().toString(36).substring(2,8).toUpperCase();
+        if (!activeSessions[code]) {
+            isUnique = true;
+        }
+    }
+    return code;
 };
 
 const handleUserJoiningRoom = (socket, roomID, existingUUID = null) => {
@@ -49,12 +64,18 @@ const handleUserJoiningRoom = (socket, roomID, existingUUID = null) => {
     // force purge: look for any record already using this UUID
     // if it exists, kill the old socket mapping before continuing
     if (activeUsers[userUUID]) {
-        const oldSocketId = activeUsers[userUUID].socketId;
-        if (oldSocketId !== socket.id) {
-            console.log(`[GHOST BUSTER] Removing old socket ${oldSocketId} for UUID ${userUUID}`);
-            delete socketToUUID[oldSocketId];
-            const oldSocket = io.sockets.sockets.get(oldSocketId);
-            if (oldSocket) oldSocket.leave(roomID);
+        const oldRoomID = activeUsers[userUUID].sessionID;
+        const oldsocketID = activeUsers[userUUID].socketID;
+        // only cleanup if the socket ID has changed
+        if (oldsocketID !== socket.id) {
+            console.log(`[GHOST BUSTER] Removing old socket ${oldsocketID} for UUID ${userUUID}`);
+            delete socketToUUID[oldsocketID];
+
+            const oldSocket = io.sockets.sockets.get(oldsocketID);
+            if (oldSocket && oldRoomID && oldRoomID !== roomID) {
+                // only leave if user is moving to a different room
+                oldSocket.leave(oldRoomID);
+            }
         }
     }
 
@@ -62,23 +83,25 @@ const handleUserJoiningRoom = (socket, roomID, existingUUID = null) => {
     socketToUUID[socket.id] = userUUID;
 
     // check to see if the session already has a host
-    const hasHost = Object.values(activeUsers).some(u => u.sessionId === roomID && u.isHost && u.id !== userUUID);
+    const hasHost = Object.values(activeUsers).some(
+        u => u.sessionID === roomID && u.isHost && u.uuid !== userUUID
+    );
 
     // reconnecting logic
     const isReconnecting = !!activeUsers[userUUID];
     if (isReconnecting) {
         // if a reconnection, update the new socket line
-        activeUsers[userUUID].socketId = socket.id;
-        activeUsers[userUUID].sessionId = roomID;
+        activeUsers[userUUID].socketID = socket.id;
+        activeUsers[userUUID].sessionID = roomID;
         activeUsers[userUUID].isHost = !hasHost;
     } else {
         // if not reconnecting and is a new user, create profile
         activeUsers[userUUID] = {
-            id: userUUID,
-            socketId: socket.id,
+            uuid: userUUID,
+            socketID: socket.id,
             name: "New User",
             color: "#cccccc",
-            sessionId: roomID,
+            sessionID: roomID,
             // if no host exists, this person is the host
             isHost: !hasHost
         };
@@ -98,14 +121,14 @@ const handleUserJoiningRoom = (socket, roomID, existingUUID = null) => {
         io.to(roomID).emit('host-change', userUUID);
     }
     
-    return userUUID;
+    return user;
 };
 
 // helper to handle the "empty room" timer
 const handleRoomCleanup = (roomID) => {
     if (!roomID) return;
 
-    const usersInRoom = Object.values(activeUsers).filter(u => u.sessionId === roomID);
+    const usersInRoom = Object.values(activeUsers).filter(u => u.sessionID === roomID);
     const numUsers = usersInRoom.length;
     
     if (numUsers <= 0) {
@@ -117,9 +140,9 @@ const handleRoomCleanup = (roomID) => {
             if (!finalCheck || finalCheck.size <= 0) {
                 delete activeSessions[roomID];
                 delete roomTimeoutRefs[roomID];
-                Object.keys(activeUsers).forEach(id => {
-                    if (activeUsers[id].sessionId === roomID) {
-                        delete activeUsers[id];
+                Object.keys(activeUsers).forEach(uuid => {
+                    if (activeUsers[uuid].sessionID === roomID) {
+                        delete activeUsers[uuid];
                     }
                 });
                 console.log(`Room ${roomID} has been deleted due to inactivity.`);
@@ -139,18 +162,17 @@ const cancelRoomDeletion = (roomID) => {
 // helper to ensure room always has a host (host leaves without selecting new host)
 const ensureHostExists = (roomID, leavingUUID) => {
     const remainingUsers = Object.values(activeUsers).filter(
-        u => u.sessionId === roomID && u.id !== leavingUUID
+        u => u.sessionID === roomID && u.uuid !== leavingUUID
     );
     if (remainingUsers.length > 0) {
         const newHost = remainingUsers[0];
         newHost.isHost = true;
-        console.log(`[HOST CHANGE] New host for room ${roomID} is ${newHost.id}`);
-        io.to(roomID).emit('host-change', newHost.id);
-        broadcastUpdate(roomID, `${newHost.name} has been promoted to host.`);
+        io.to(roomID).emit('host-change', newHost.uuid);
+        broadcastUpdate(roomID, `[HOST CHANGE] New host for room ${roomID} is ${newHost.uuid}`);
     };
 };
 
-// sanitize any text/name
+// helper to sanitize any text/name
 const sanitize = (text) => {
     if (typeof text !== 'string') return '';
     return text
@@ -161,6 +183,29 @@ const sanitize = (text) => {
         .replace(/'/g, "&#039;");
 };
 
+// helper to get target room for start/stopping typing
+const getRoomData = (roomID, senderUUID) => {
+    const isDM = roomID.includes('_');
+    const targetRoom = isDM 
+    ? roomID.split('_').find(uuid => uuid !== senderUUID)
+    : roomID;
+    return { targetRoom, isDM };
+};
+
+// helper for callbacks
+const handleEvent = (handler) => {
+    return async (data, callback) => {
+        // Automatically creates the safeCallback for you
+        const cb = typeof callback === 'function' ? callback : () => {};
+        try {
+            await handler(data, cb);
+        } catch (err) {
+            console.error("Socket Error:", err);
+            cb({ success: false, error: err.message || "Internal Server Error" });
+        }
+    };
+};
+
 // 3. handle live connections
 io.on('connection', (socket) => { // an event listener -- waits for user to open the app, and when opened, it triggers a function that gives that specific user a unique "socket" object (their personal "phone line" to the server)
     // io.on('..', (ALWAYS gives socket/ID number))
@@ -168,193 +213,184 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
     console.log(`New user connected: ${socket.id}`);
  
     // ---- CREATE SESSION -----
-    socket.on('create-session', (data, callback) => {
-        const roomID = data.roomID;
-        const existingUUID = data.existingUUID || null;
-        const userUUID = handleUserJoiningRoom(socket, roomID, existingUUID);
-        console.log(`Session Created: ${roomID}`);
+    socket.on('create-session', handleEvent(async ({ existingUUID }, cb) => {
+        const roomID = generateUniqueCode();
+        const user = handleUserJoiningRoom(socket, roomID, existingUUID);
+        console.log(`Session Created: ${roomID} for user: ${user.uuid}`);
 
-        if (typeof callback == 'function') {
-            // return new UUID so phone can store it
-            callback({ userUUID });
-        }
-    });
+        // return new UUID so phone can store it
+        cb({ 
+            success: true, 
+            exists: true,
+            full: false,
+            roomID: roomID, 
+            userUUID: user.uuid,
+            alreadyRegistered: false, 
+            isHost: user.isHost || false,
+            currentUsers: [user],
+            name: user.name,
+            color: user.color
+        });
+    }));
 
     // ---- JOIN A SESSION ----
-    socket.on('join-session', (data, callback) => {
-        // data can be either a just a string "roomID", or an object { roomID, existingUUID }
-        const roomID = typeof data === 'string'? data : data.roomID;
-        const existingUUID = data.existingUUID || null;
+    socket.on('join-session', handleEvent(async ({ roomID, existingUUID = null }, cb) => {
+        // ensure roomID was passed & session exists
+        if (!roomID) return cb({ success: false, error: "No session code provided." });
+        if(!activeSessions[roomID]) return cb({ success: false, exists: "Session does not exist." });
 
-        console.log(`Request to join room: ${roomID} from ${socket.id}`);
+        // check capacity and returning user status 
+        const usersInRoom = Object.values(activeUsers).filter(u => u.sessionID === roomID);          
+        const isReturningUser = !!(existingUUID && activeUsers[existingUUID] && activeUsers[existingUUID].sessionID === roomID);
 
-        // checks to see if session exists/is active  
-        if (activeSessions[roomID] != undefined) {  
-            const usersAlreadyInRoom = Object.values(activeUsers).filter(u => u.sessionId === roomID);          
-            const isReturningUser = existingUUID && activeUsers[existingUUID] && activeUsers[existingUUID].sessionId === roomID;
+        // checks to see if room is full (skip if a returning user)
+        if(usersInRoom.length >= maxSessionCapacity && !isReturningUser) {
+            return cb({ success: false, error: "Session is full." });
+        } 
 
-            // checks to see if room is full (skip if a returning user)
-            if(usersAlreadyInRoom.length >= 12 && !isReturningUser) {
-                console.log(`Failed: Room ${roomID} is full.`);
-                if (typeof callback == 'function') {
-                    callback({ exists: true, full: true });
-                }
-            } else {
-                // pass existing UUID to helper
-                const userUUID = handleUserJoiningRoom(socket, roomID, existingUUID);
-                // get user's data to see if they were already registered
-                const userData = activeUsers[userUUID];
-                const alreadyRegistered = !!(userData && userData.color !== '#cccccc' && userData.name !== "New User");
-                // refresh current user list
-                const currentUsers = Object.values(activeUsers).filter(u => u.sessionId === roomID);
-                if (typeof callback == 'function') {
-                    callback({ 
-                        exists: true, 
-                        full: false, 
-                        currentUsers, 
-                        userUUID,
-                        alreadyRegistered,
-                        userData: alreadyRegistered ? { name: userData.name, color: userData.color } : null,
-                        isHost: userData.isHost || false
-                    });
-                }
-            }
-        } else {
-            console.log(`Failed: Room ${roomID} does not exist.`);
-            if (typeof callback == 'function') { 
-                callback({ exists : false });
-            }
-        }
-    });
+        // everything is good, join and check to see if they are returning 
+        // based on default color & name
+        const user = handleUserJoiningRoom(socket, roomID, existingUUID);
+        const alreadyRegistered = !!(user && user.color !== '#cccccc' && user.name !== "New User");
+        console.log(`[JOIN] Room: ${roomID} | User: ${user.uuid} | Returning: ${alreadyRegistered}`);
+        cb({ 
+            success: true, 
+            exists: true,
+            full: false,
+            userUUID: user.uuid,
+            alreadyRegistered,
+            isHost: user.isHost || false,
+            currentUsers: usersInRoom,
+            name: user.name,
+            color: user.color
+        });
+    }));
 
     // ---- UPDATE PROFILE -----
-    socket.on('update-user', (profile, callback) => {
-        // profile = { name: ..., color: ...}
+    socket.on('update-user', handleEvent(async (profile, cb) => {
         const userUUID = socketToUUID[socket.id];
+        const user = activeUsers[userUUID];
 
         // if we can't find user, don't try and update them
-        if (!userUUID || !activeUsers[userUUID])   {
-            console.log(`Update failed: no UUID found for socket ${socket.id}`);
-            return;
+        if (!userUUID || !user)   {
+            throw new Error(`[UPDATE] failed: no UUID found for socket ${socket.id}`);
         }
 
         // color taken logic
-        const roomID = activeUsers[userUUID].sessionId;
-        const isColorTaken = Object.values(activeUsers).some
-            (u => u.sessionId === roomID && u.id !== userUUID && u.color === profile.color);
+        const roomID = user.sessionID;
+        const isColorTaken = Object.values(activeUsers).some(
+            u => u.sessionID === roomID && u.uuid !== userUUID && u.color === profile.color
+        );
         if (isColorTaken) {
-            if (typeof callback === 'function') {
-                callback({ success: false, message: "That color was just taken! Please choose another one." });
-            }
-            return;
+            return cb({ success: false, error: "Color was just taken. Please choose another."});
         }
 
+        // sanitize and update memory
         const cleanName = sanitize(profile.name || "Anonymous");
-        // update profile while preserving critical server-side data
         activeUsers[userUUID] = { 
-            ...activeUsers[userUUID], 
+            ...user, 
             name: cleanName, 
             color: profile.color 
         };
 
-        if (typeof callback === 'function') {
-            callback({ success: true, uuid: userUUID });
-        }
-
+        cb({ success: true });
         // broadcast refreshed list to everyone in that session
-        broadcastUpdate(activeUsers[userUUID].sessionId, `User ${userUUID} (${profile.name}) updated their profile.`);
-    });
+        broadcastUpdate(roomID, `User ${cleanName} updated their profile.`);
+    }));
 
     // --- CASE 1: user voluntarily leaves session (exit room)
-    socket.on('leave-session', (roomID) => {
-        const uuid = socketToUUID[socket.id];
-        const user = activeUsers[uuid];
+    socket.on('leave-session', handleEvent(async ({ roomID }, cb) => {
+        const userUUID = socketToUUID[socket.id];
+        const user = activeUsers[userUUID];
+
+        // if user is gone from records, do nothing
+        if (!user) return cb({ success: true });
+
         const userName = user.name || "Unknown User";
 
-        broadcastUpdate(roomID, `User ${userName} left room ${roomID}`);
-
-        if (!user) return; // if user is gone from records, do nothing
-
         // if user was the host, pick a new one
-        if (user.isHost === true) {
-            ensureHostExists(roomID, uuid);
-        }
+        if (user.isHost === true) ensureHostExists(roomID, userUUID);
 
-        // delete user data
-        delete activeUsers[uuid];  
+        // delete user data & remove sockets
+        delete activeUsers[userUUID];  
         delete socketToUUID[socket.id];
-
-        // remove sockets from rooms
         socket.leave(roomID);
-        socket.leave(uuid);
+        socket.leave(userUUID);
+
+        cb({ success: true });
+
+        broadcastUpdate(roomID, `User ${userName} left room ${roomID}`);
         
         // check if room is now empty
         setTimeout(() => {
             handleRoomCleanup(roomID);
         }, 50);         
-    });
+    }));
 
     // ---- CASE 2: DISCONNECT (eg. unexpected exits, closing the app) ----------
     socket.on('disconnect', () => { 
-        const uuid = socketToUUID[socket.id];
-        const user = activeUsers[uuid];
+        const userUUID = socketToUUID[socket.id];
+        const user = activeUsers[userUUID];
 
-        if (user) {
-            const roomID = user.sessionId;
-            const userName = user.name || "Unknown User";
-            console.log(`[BLINK] User ${userName} disconnected. Waiting for grace period...`);
+        if (!user) return;
 
-            // immediate UI cleanup, stop anytyping indicaters
-            socket.broadcast.emit('user-stop-typing', { id: uuid });
+        const roomID = user.sessionID;
+        const userName = user.name || "Unknown User";
+        console.log(`[BLINK] User ${userName} disconnected. Waiting for grace period...`);
 
-            // start grace period of 15 seconds
-            setTimeout(() => {
-                // check if user is still associated with the disconnected socket
-                // if they reconnect, activeUsers[uuid].socketId will be different
-                if (activeUsers[uuid] && activeUsers[uuid].socketId === socket.id)  {
-                    console.log(`[EXIT] Grace period expired for ${userName}. Cleaning up.`);
+        // immediate UI cleanup, stop anytyping indicaters
+        socket.broadcast.emit('user-stop-typing', { senderUUID: userUUID });
 
-                    // leave logic
-                    if (user.isHost === true) ensureHostExists(roomID, uuid);
+        // start grace period of 15 seconds
+        setTimeout(() => {
+            // get most current version of user
+            const currentUser = activeUsers[userUUID];
+            // check if user is still associated with the disconnected socket
+            // if they reconnect, activeUsers[userUUID].socketID will be different
+            if (currentUser && currentUser.socketID === socket.id)  {
+                console.log(`[EXIT] Grace period expired for ${userName}. Cleaning up.`);
 
-                    // clean memory
-                    delete activeUsers[uuid];
-                    delete socketToUUID[socket.id];
+                // leave logic
+                if (currentUser.isHost === true) ensureHostExists(roomID, userUUID);
 
-                    // broadcast and room check
-                    handleRoomCleanup(roomID);
-                    broadcastUpdate(roomID, `User ${userName} left room ${roomID}`);
-                } else {
-                    // if user reconnects in time, socket.id should be changed
-                    console.log(`[RECOVERY] User ${userName} reconnected within grace period.`);
-                    // remove old socket mapping
-                    delete socketToUUID[socket.id]; 
-                }
-            }, 15000);
-        }
+                // clean memory
+                delete activeUsers[userUUID];
+                delete socketToUUID[socket.id];
+
+                // broadcast and room check
+                handleRoomCleanup(roomID);
+                broadcastUpdate(roomID, `User ${userName} left room ${roomID}`);
+            } else {
+                // if user reconnects in time, socket.id should be changed
+                console.log(`[RECOVERY] User ${userName} reconnected within grace period.`);
+                // remove old socket mapping
+                delete socketToUUID[socket.id]; 
+            }
+        }, 15000);
     });
 
     // --- CASE 3: Host ends session for everyone ----
-    socket.on('end-session', (roomID) => {
+    socket.on('end-session', handleEvent(async ({ roomID }, cb) => {
         const senderUUID = socketToUUID[socket.id];
         const sender = activeUsers[senderUUID];
 
         // only host allowed to nuke the room
         if (!sender || !sender.isHost) {
-            console.log(`Unauthorized end-session attempt by ${socket.id}`);
-            return;
+            throw new Error(`Unauthorized attempt by ${sender.name || socket.id} to end session.`);
         }
 
         console.log(`Host ${sender.name} is ending session: ${roomID}`);
         io.to(roomID).emit('session-ended');
 
-        // clean up memory for everyone who was in that room
-        Object.keys(activeUsers).forEach(uuid => {
-            if (activeUsers[uuid].sessionId === roomID) {
-                const userSocketId = activeUsers[uuid].socketId;
-                delete socketToUUID[userSocketId];
-                delete activeUsers[uuid];
-            }
+        const room = io.sockets.adapter.rooms.get(roomID);
+        room?.forEach(socketID => {
+            const socketObject = io.sockets.sockets.get(socketID);
+            const userUUID = socketToUUID[socketID];
+
+            socketObject?.leave(roomID);
+            if (userUUID) socketObject?.leave(userUUID); 
+            delete socketToUUID[socketID];
+            delete activeUsers[senderUUID];
         });
 
         // remove room from active sessions
@@ -364,54 +400,46 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
             delete roomTimeoutRefs[roomID];
         }
 
-        // force everyone out of socket room
-        const room = io.sockets.adapter.rooms.get(roomID);
-        if (room) {
-            for (const socketId of room) {
-                const s = io.sockets.sockets.get(socketId);
-                if (s) {
-                    s.leave(roomID);
-                    // also leave private UUID room
-                    const u = socketToUUID[socketId];
-                    if (u) s.leave(u);
-                }
-            }
-        }
-
+        cb({ success: true });
         console.log(`Session ${roomID} fully purged.`);
-    });
+    }));
 
     // --- CASE 4: host removes a specific user ---
-    socket.on('remove-user', ( {roomID, userUUIDToRemove} ) => {
+    socket.on('remove-user', handleEvent(async ({roomID, userUUIDToRemove}, cb) => {
         const senderUUID = socketToUUID[socket.id];
         const sender = activeUsers[senderUUID];
 
         // only host can kick people 
-        if (!sender || !sender.isHost) return;
+        if (!sender || !sender.isHost) {
+            throw new Error(`Unauthorized attempt by ${sender.name || `User`} to remove user.`);
+        }
 
         // find victim
         const targetUser = activeUsers[userUUIDToRemove];
-        if (!targetUser) return;
-        const targetSocket = io.sockets.sockets.get(targetUser.socketId);
-        const userName = targetUser.name || "User";
+        // if aren't in activeUsers they're already gone
+        if (!targetUser) {
+            return cb({ success: true });
+        }
 
-        // force specific socket to leave room
+        // force victim socket to leave room
+        const targetSocket = io.sockets.sockets.get(targetUser.socketID);
         if (targetSocket) {
-            targetSocket.emit('removed-from-session'); // tell victim's app they're being removed
+            targetSocket.emit('removed-from-session'); 
             targetSocket.leave(roomID); 
             targetSocket.leave(userUUIDToRemove);
         }
 
         // cleanup & notify
-        delete socketToUUID[targetUser.socketId];
+        delete socketToUUID[targetUser.socketID];
         delete activeUsers[userUUIDToRemove]; 
-        broadcastUpdate(roomID, `User (${userName}) was removed by the host.`);
 
+        cb({ success: true });
+        broadcastUpdate(roomID, `User (${targetUser.name || `User`}) was removed by the host.`);
         handleRoomCleanup(roomID);
-    });
+    }));
 
     // --- TRANSFER HOST STATUS ----
-    socket.on('transfer-host', ( {roomID, newHostUUID}, callback ) => {
+    socket.on('transfer-host', handleEvent(async ({roomID, newHostUUID}, cb ) => {
         const senderUUID = socketToUUID[socket.id];
         const sender = activeUsers[senderUUID];
 
@@ -420,158 +448,149 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
         
         // only host can transfer power
         if (!sender || !sender.isHost ) {
-            console.log(`Unauthorized transfer attempt by ${sender?.name || socket.id}`);
-            if (callback) callback({ success: false });
-            return;
+            throw new Error(`[HOST] Unauthorized transfer attempt by ${sender?.name || socket.id}`);
         }
 
         // verify new host exists in room
         const targetUser = activeUsers[newHostUUID];
-        if (!targetUser || targetUser.sessionId !== roomID) {
-            console.log(`Transfer failed: target user ${newHostUUID} not found in room.`);
-            if (callback) callback({ success: false });
-            return;
+        if (!targetUser || targetUser.sessionID !== roomID) {
+            throw new Error(`[HOST] Transfer failed: target user ${newHostUUID} not found in room.`);
         }
 
-        console.log(`[HOST] Transferring host status in room ${roomID} to ${newHostUUID}`);
+        console.log(`[HOST] Transferred host status in room ${roomID} to ${newHostUUID}`);
         sender.isHost = false;
         targetUser.isHost = true;
 
         io.to(roomID).emit('host-change', newHostUUID);
+        cb({ success: true });
         broadcastUpdate(roomID, `${targetUser.name} is now the host.`);
-        if (callback) callback({ success: true });
-    });
+    }));
 
     // --- MESSAGING ----
-
-    const formatOutboundMessage = (user, roomID, context, isDM, messageUUID, senderUUID) => ({
+    const formatInboundMessage = (user, roomID, context, msgID) => ({
+        msgID,
         roomID,
-        sender: user.name,
+        senderUUID: user.uuid,
+        senderName: user.name,
         color: user.color,
         context: {
-            text: context.text,
+            text: sanitize(context.text || ""),
             isEncrypted: context.isEncrypted || false,
             version: context.version || "1.0"
         },
-        id: messageUUID,
-        senderUUID: senderUUID,
-        isDirectMessage: isDM,
         serverTimestamp: Date.now()
     });
 
-    socket.on('send-message', (messageData, callback) => {
-        const uuid = socketToUUID[socket.id];
-        const sender = activeUsers[uuid];
+    socket.on('send-message', handleEvent(async (messageData, cb) => {
+        const senderUUID = socketToUUID[socket.id];
+        const sender = activeUsers[senderUUID];
+
         // console.log("data being sent: ", messageData);
 
         // validate the message, don't process empty data
-        if (!sender || !messageData.context?.text?.trim() ) {
-            if (callback) callback({ success: false, message: "Invalid message data." });
-            return;
+        if (!messageData.context?.text?.trim() ) {
+            return cb({ success: false, error: "Message failed to send: invalid message data." });
         }
+        if (!sender || !messageData.roomID) {
+            throw new Error("Message send failed: sender session expired.");
+        }
+        
+        // messageData.room is either Auuid_Buuid or sessionID
+        // targetRoom is the uuid of the DM recipient or the sessionID
+        const { targetRoom, isDM } = getRoomData(messageData.roomID, senderUUID);
 
-        const sanitizedContext = {
-            ...messageData.context,
-            text: sanitize(messageData.context.text)
-        };
-
-        // reconstruct package, don't just send 'messagData', only emit what's necessary
-        const outboundData = formatOutboundMessage(
+        // reconstruct package, don't just send 'outboundData', only emit what's necessary
+        const formattedMessage = formatInboundMessage(
             sender, 
             messageData.roomID, 
-            sanitizedContext, 
-            false, 
-            messageData.id,
-            uuid
+            messageData.context,
+            messageData.msgID,
         );
 
-        // broadcast to everyone in room
-        io.to(messageData.roomID).emit('receive-message', outboundData);
-        if (callback) callback({ success: true, serverTimestamp: outboundData.serverTimestamp });
-        console.log(`[CHAT] Room ${messageData.roomID} | ${sender.name}: ${outboundData.context.text}`);
+        // send message
+        socket.to(targetRoom).emit('receive-message', formattedMessage);
+        cb({ 
+            success: true, 
+            msgID: messageData.msgID,
+            serverTimestamp: formattedMessage.serverTimestamp 
+        });
+
+        console.log(`[${isDM ? `DM` : `CHAT`}] ${sender.name} -> ${targetRoom}: ${formattedMessage.context.text}`);
         // console.log("data being sent to receive-message: ", outboundData);
-    });
+    }));
 
-    socket.on('send-direct-message', (messageData, callback) => {
-        const uuid = socketToUUID[socket.id];
-        const sender = activeUsers[uuid];
-        const { recipientUUID, context } = messageData;
+    socket.on('edit-message', handleEvent(async (data, cb) => {
+        const senderUUID = socketToUUID[socket.id];
+        const sender = activeUsers[senderUUID];
+        const { roomID, msgID, newText } = data;
 
-        if (!sender || !context?.text?.trim() || !recipientUUID || !activeUsers[recipientUUID]) {
-            if (callback) callback({ success: false, message: "Invalid message data or recipient doesn't exist." });
-            return;
+        if (!sender || !roomID) {
+            throw new Error("Session expired or room doesn't exist.");
         }
-
-        const sanitizedContext = {
-            ...messageData.context,
-            text: sanitize(messageData.context.text)
-        };
+        if(!msgID || !newText?.trim() ) {
+            return cb({ success: false, error: "Message is empty or doesn't exist." });
+        }
         
-        const dmRoomID = [uuid, recipientUUID].sort().join('_');
-        const outboundData = formatOutboundMessage(
-            sender, 
-            dmRoomID, 
-            sanitizedContext, 
-            true, 
-            messageData.id,
-            uuid
-        );
+        const { targetRoom } = getRoomData(roomID, senderUUID);
 
-        io.to(recipientUUID).emit('receive-message', outboundData);
-        if (callback) callback({ success: true });
-        console.log(`DM from ${sender.name} to ${recipientUUID}: ${context.text}`);
-    });
-
-    socket.on('edit-message', (data) => {
-        const { roomID, messageID, newText } = data;
-        if(!roomID || !messageID || !newText?.trim()) return;
-
-        io.to(roomID).emit('message-edited', {
+        socket.to(targetRoom).emit('message-edited', {
             roomID,
-            messageID,
+            msgID,
             newText: sanitize(newText.trim())
         });
-        console.log(`[EDIT] Room ${roomID} | Message ${messageID} edited to: ${newText.trim()}`);
-    });
 
-    socket.on('delete-message', (data) => {
-        const { roomID, messageID, userName } = data;
-        if(!roomID || !messageID) return;
+        cb({ success: true });
+        console.log(`[EDIT] Room ${roomID} | Message ${msgID} edited to: ${newText.trim()}`);
+    }));
 
-        io.to(roomID).emit('message-deleted', {
+    socket.on('delete-message', handleEvent(async (data, cb) => {
+        const senderUUID = socketToUUID[socket.id];
+        const sender = activeUsers[senderUUID];
+        const { roomID, msgID } = data;
+
+        if(!sender || !roomID ) {
+            throw new Error("Delete failed: session expired.");
+        }
+        if (!msgID ) {
+            return cb({ success: false, error: "Delete failed: missing msgID."});
+        }
+        
+        const { targetRoom } = getRoomData(roomID, senderUUID);
+
+        socket.to(targetRoom).emit('message-deleted', {
             roomID,
-            messageID,
-            userName,
+            msgID,
+            senderName: sender.name,
         });
-        console.log(`[DELETE] Room ${roomID} | Message ${messageID} deleted by ${userName}`);
-    });
 
-    socket.on('join-dm', ( {dmRoomID } ) => {
-        // don't need to broadcast anything, just silently join room so socket receives 'user-typing'
-        // for this DM
-        socket.join(dmRoomID);
-    });
+        cb({ success: true });
+        console.log(`[DELETE] Room ${roomID} | Message ${msgID} deleted by ${sender.name}`);
+    }));
 
-    socket.on('typing', (data) => {
-        const uuid = socketToUUID[socket.id];
-        const sender = activeUsers[uuid];
-        if (!uuid) return;
+    socket.on('typing', ({ roomID }) => {
+        const senderUUID = socketToUUID[socket.id];
+        const sender = activeUsers[senderUUID];
+        if (!sender || !roomID ) return;
+ 
+        const { targetRoom } = getRoomData(roomID, senderUUID);
 
-        // data.roomID is either sessionId or dmRoomID
-        socket.to(data.roomID).emit('user-typing', {
-            roomID: data.roomID,
-            name: sender.name, // use desanitized name
-            id: uuid
+        // data.roomID is either sessionID or dmRoomID
+        socket.to(targetRoom).emit('user-typing', {
+            roomID,
+            senderUUID, 
+            senderName: sender.name
         }); 
     });
 
-    socket.on('stop-typing', (data) => {
-        const uuid = socketToUUID[socket.id];
-        if (!uuid) return;
+    socket.on('stop-typing', ({ roomID }) => {
+        const senderUUID = socketToUUID[socket.id];
+        if (!senderUUID || !roomID ) return;
+ 
+        const { targetRoom } = getRoomData(roomID, senderUUID);
 
-        socket.to(data.roomID).emit('user-stop-typing', {
-            roomID: data.roomID,
-            id: uuid
+        socket.to(targetRoom).emit('user-stop-typing', {
+            roomID,
+            senderUUID
         });
     });
 

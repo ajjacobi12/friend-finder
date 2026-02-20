@@ -1,14 +1,20 @@
-// SidebarUserItem.js
+// SidebarItem.js
 import React, { useCallback } from 'react';
 import { Pressable, Text, View, FlatList } from 'react-native';
 import Modal from 'react-native-modal';
-import { styles } from '../../styles';
-import { useChatLogic } from '../hooks/useChatLogic';
-import { useUser } from '../../UserContext';
+
+import { styles } from '../../styles/styles';
+import { useUser } from '../../context/UserContext';
+
+// logic helper, sorts userUUIDs in ascending order then joins with a '_' to keep it consistent
+// across both users
+const getRoomID = (id1, id2) => [id1, id2].sort().join('_');
 
 // this doesn't need to constantly re-render, so we wrap it in React.memo
 // just visual component for each user in the sidebar list
-const SidebarUserItem = React.memo(({ item, isUnread, onChatPress }) => {
+const SidebarItem = React.memo(({ item, isUnread, onChatPress }) => {
+    const { name, color } = item;
+
     return (
         <Pressable
             onPress={() => onChatPress(item)}
@@ -16,19 +22,19 @@ const SidebarUserItem = React.memo(({ item, isUnread, onChatPress }) => {
                 styles.userItem,
                 {
                     borderLeftWidth: 4,
-                    borderLeftColor: isUnread ? item.color : 'transparent',
-                    backgroundColor: isUnread ? item.color + '20' : 'transparent',
+                    borderLeftColor: isUnread ? color : 'transparent',
+                    backgroundColor: isUnread ? color + '20' : 'transparent',
                 }
             ]}
         >
-            <View style={[styles.userDot, { backgroundColor: item.color, marginLeft: 5 }]} />
+            <View style={[styles.userDot, { backgroundColor: color, marginLeft: 5 }]} />
             <View style={{ flex: 1 }}>
                 <Text style={[styles.userName, isUnread && { fontWeight: 'bold' } ]}>
-                    {item.name}
+                    {name}
                 </Text>
             </View>
             {isUnread ? (
-                <Text style={{ color: item.color, fontWeight: 'bold', fontSize: 15}}>NEW   </Text>
+                <Text style={{ color: color, fontWeight: 'bold', fontSize: 15}}>NEW   </Text>
             ) : (
             <Text style={{color: '#999'}}>Chat ➔</Text>
             )}
@@ -39,23 +45,33 @@ const SidebarUserItem = React.memo(({ item, isUnread, onChatPress }) => {
 export default function Sidebar({ isVisible, setIsSidebarVisible, navigation }) {
     const { friends, unreadRooms, userUUID } = useUser();
 
-    // passing navigation on to chat logic hook so it can navigate to chat screen
-    const chat = useChatLogic({ navigation });
+    // --- OPEN DM ---
+    const startPrivateChat = useCallback((targetUser) => {
+        setIsSidebarVisible(false);
+
+        // create unique room id for both people
+        const DMroomID = getRoomID(userUUID, targetUser.uuid);
+
+        // define the navigation parameters
+        navigation.navigate('Chat', {
+            isDirectMessage: true,
+            DMroomID,
+            recipientName: targetUser.name,
+        });
+    }, [userUUID, navigation, setIsSidebarVisible]);
     
     const renderUser = useCallback(( { item }) => {
-        const itemDmRoomId = [userUUID, item.id].sort().join('_');
+        const itemDmRoomId = getRoomID(userUUID, item.uuid);
         const isUnread = unreadRooms.includes(itemDmRoomId);
 
         return (
-            <SidebarUserItem
+            <SidebarItem
                 item={item}
                 isUnread={isUnread}
-                onChatPress={(user) => {
-                    chat.startPrivateChat(user, () => setIsSidebarVisible(false));
-                }}
+                onChatPress={startPrivateChat}
             />
         );
-    }, [userUUID, unreadRooms, chat.startPrivateChat, setIsSidebarVisible]);
+    }, [userUUID, unreadRooms, startPrivateChat]);
 
     return (
         <Modal
@@ -86,7 +102,7 @@ export default function Sidebar({ isVisible, setIsSidebarVisible, navigation }) 
                 <FlatList
                     data={friends}
                     renderItem={renderUser}
-                    keyExtractor={(item) => item.id}
+                    keyExtractor={(item) => item.uuid}
                     initialNumToRender={10}
                     windowSize={5}
                     ListEmptyComponent={() => (

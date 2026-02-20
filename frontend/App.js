@@ -8,17 +8,19 @@ import React from 'react';
 import { DefaultTheme, NavigationContainer } from '@react-navigation/native'; // manages app state and links app to phone's back button
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
-import { UserProvider, useUser } from './UserContext' // "global memory", wrapping everything in this, every screen can access the same data without having to pass it manually every time
-import { navigationRef } from './navigationService';
-import { TouchableOpacity, Pressable, Text, View} from 'react-native';
+import { View} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
+import { UserProvider, useUser } from './src/context/UserContext' // "global memory", wrapping everything in this, every screen can access the same data without having to pass it manually every time
+import { navigationRef } from './src/services/navigationService';
 
 // import screens
-import ProfileScreen from './screens/ProfileScreen'
-import HomeScreen from './screens/HomeScreen';
-import ChatScreen from './screens/ChatScreen';
-import MapScreen from './screens/MapScreen';
-import LoginScreen from './screens/LoginScreen'
+import ProfileScreen from './src/screens/ProfileScreen'
+import HomeScreen from './src/screens/HomeScreen';
+import ChatScreen from './src/screens/ChatScreen';
+import MapScreen from './src/screens/MapScreen';
+import LoginScreen from './src/screens/LoginScreen'
 
 // initializing the Stack tool to allow screens to slide on top of each other
 // two components: stack.navigator (the manager) and stack.screen (the individual pages)
@@ -127,13 +129,17 @@ function AppNavigator() {
 
 export default function App() { 
   return (
-    <UserProvider> 
-        {/* wrapping in this to allow global access of user data */}
+    <SafeAreaProvider>
+      <KeyboardProvider>
+        <UserProvider> 
+            {/* wrapping in this to allow global access of user data */}
 
-        <NavigationContainer ref={navigationRef} theme={myTheme}>
-        {/* wrapping in this to allow navigator to manage which screen is currently visible */}
-            <AppNavigator/>
-        </NavigationContainer>
-    </UserProvider>
+            <NavigationContainer ref={navigationRef} theme={myTheme}>
+            {/* wrapping in this to allow navigator to manage which screen is currently visible */}
+                <AppNavigator/>
+            </NavigationContainer>
+        </UserProvider>
+      </KeyboardProvider>
+    </SafeAreaProvider>
   );
 }
