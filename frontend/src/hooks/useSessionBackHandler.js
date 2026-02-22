@@ -7,8 +7,7 @@ export function useSessionBackHandler(onLeaveAction) {
     useFocusEffect(
         useCallback(() => {
             const onBackPress = () => {
-                onLeaveAction();
-                return true;
+                return onLeaveAction();
             };
 
             const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);

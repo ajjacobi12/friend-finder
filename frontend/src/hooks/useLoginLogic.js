@@ -9,7 +9,7 @@ import { createSessionAction, joinSessionAction } from '../services/socketServic
     
 export const useLoginLogic = ({ navigation, isJoinScreen, hideJoinInput }) => {    
 
-    const { setSessionId, setSessionUsers, setName, setSelectedColor, 
+    const { setSessionID, setSessionUsers, setName, setSelectedColor, 
         setHasRegistered, isConnected, setIsHost, justCreatedSession, 
         userUUID, setUserUUID } = useUser();
 
@@ -44,7 +44,7 @@ export const useLoginLogic = ({ navigation, isJoinScreen, hideJoinInput }) => {
     const handleSuccess = (response) => {
         // sync all context state with response
         setUserUUID(response.userUUID);
-        setSessionId(response.roomID); 
+        setSessionID(response.sessionID); 
         setIsHost(response.isHost || false);
         setSessionUsers(response.currentUsers || []);
         setName(response.name);
@@ -90,9 +90,9 @@ export const useLoginLogic = ({ navigation, isJoinScreen, hideJoinInput }) => {
         }
         if (!startRequest('joining', false)) return;
         
-        const code = tempCode.toUpperCase();
+        const sessionID = tempCode.toUpperCase();
         try {
-            const response = await joinSessionAction(code, userUUID);
+            const response = await joinSessionAction(sessionID, userUUID);
             // check if android user hits back while server was processing
             if (activeRequest.current !== 'joining') return;
             handleSuccess(response);

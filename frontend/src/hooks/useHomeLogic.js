@@ -1,5 +1,5 @@
 // useHomeLogic.js
-import { useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { Alert } from 'react-native';
 
 import { useUser } from '../context/UserContext';
@@ -8,7 +8,9 @@ import { useSessionBackHandler } from './useSessionBackHandler';
 import { removeUserAction, transferHostAction, endSessionAction, leaveSessionAction } from '../services/socketServices';
 
 export const useHomeLogic = () => {
-    const { sessionId, isHost, friends, handleCleanExit } = useUser();
+    const { sessionID, isHost, friends, handleCleanExit } = useUser();
+    
+    const [showTransfer, setShowTransfer] = useState(false);
 
     // takes care of android "back" button
     const onLeaveHome = useCallback(() => {
@@ -31,13 +33,13 @@ export const useHomeLogic = () => {
         if (!confirmed) return;
 
         try {
-            await removeUserAction(sessionId, friend.uuid);
+            await removeUserAction(sessionID, friend.uuid);
             return true;
         } catch (err) {
             Alert.alert("Error", err.message);
             return false;
         }
-    }, [sessionId]);
+    }, [sessionID]);
 
     // --- TRANSFER HOST STATUS ---
     const handleTransferHost = useCallback( async (friend) => {
@@ -53,13 +55,13 @@ export const useHomeLogic = () => {
         if (!confirmed) return;
 
         try {
-            await transferHostAction(sessionId, friend.uuid);
+            await transferHostAction(sessionID, friend.uuid);
             return true;
         } catch (err) {
             Alert.alert("Error", err.message);
             return false;
         }
-    }, [sessionId]);
+    }, [sessionID]);
 
     // --- END SESSION FOR ALL USERS ---
     const endSessionForAll = useCallback( async () => {
@@ -75,17 +77,17 @@ export const useHomeLogic = () => {
         if (!confirmed) return;
 
         try {
-            await endSessionAction(sessionId);
+            await endSessionAction(sessionID);
         } catch (err) {
             Alert.alert("Error", err.message);
         }
-    }, [sessionId]);
+    }, [sessionID]);
 
     // --- VOLUNTARILY LEAVE A SESSION ---
-    const leaveSession = useCallback( async (triggerModal) => {
+    const leaveSession = useCallback( async () => {
         // if host is leaving but there are 2 or more other users, require transfer of ownership first
         if (isHost && friends.length > 1) {
-            triggerModal();
+            setShowTransfer(true);
             return;
         }
 
@@ -102,13 +104,27 @@ export const useHomeLogic = () => {
         if (!confirmed) return;
 
         try {
-            await leaveSessionAction(sessionId);
+            await leaveSessionAction(sessionID);
             handleCleanExit();
         } catch (err) {
             Alert.alert("Error", err.message);
         }
 
-    }, [sessionId, isHost, friends, handleCleanExit]);
+    }, [sessionID, isHost, friends, handleCleanExit]);
+
+    const modalTransferHost = async (selectedFriend) => {
+        const confirmed = await handleTransferHost(selectedFriend);
+        if (confirmed) {
+            try {
+                await leaveSessionAction(sessionID);
+                setShowTransfer(false);
+                handleCleanExit();
+            } catch (err) {
+                Alert.alert("Transfer failed", err.message);
+            }
+        }
+    };
   
-    return { removeUser, handleTransferHost, endSessionForAll, leaveSession, leaveSessionAction };
+    return { removeUser, handleTransferHost, endSessionForAll, leaveSession, 
+        modalTransferHost, showTransfer, setShowTransfer };
 };

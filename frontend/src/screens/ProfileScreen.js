@@ -19,7 +19,7 @@ export default function ProfileScreen({ navigation }) {
         loading, errorMsg, 
         tempName, setTempName,
         selectedColor, hasRegistered, 
-        friends, sessionId
+        friends, sessionID
     } = useProfileLogic({ navigation, colorOptions });
 
     const insets = useSafeAreaInsets();
@@ -90,7 +90,7 @@ export default function ProfileScreen({ navigation }) {
                     {errorMsg ? <Text style={{color: 'red'}}>{errorMsg}</Text> : null}
 
                     {/* enter lobby button */}
-                    {(sessionId && !hasRegistered) ? (
+                    {(sessionID && !hasRegistered) ? (
                         <Pressable 
                             style={styles.button} 
                             onPress={handleJoin} 

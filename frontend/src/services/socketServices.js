@@ -40,54 +40,54 @@ export const secureEmit = (eventName, data) => {
 };
 
 // ------ HOME FUNCTIONS --------
-export const removeUserAction = async (roomID, userUUIDToRemove) => {
-    return await secureEmit('remove-user', { roomID, userUUIDToRemove });
+export const removeUserAction = (sessionID, userUUIDToRemove) => {
+    return secureEmit('remove-user', { sessionID, userUUIDToRemove });
 };
 
-export const transferHostAction = async (roomID, newHostUUID) => {
-    return await secureEmit('transfer-host', { roomID, newHostUUID });
+export const transferHostAction = (sessionID, newHostUUID) => {
+    return secureEmit('transfer-host', { sessionID, newHostUUID });
 };
 
-export const endSessionAction = async (roomID) => {
-    return await secureEmit('end-session', { roomID });
+export const endSessionAction = (sessionID) => {
+    return secureEmit('end-session', { sessionID });
 };
 
 // ------- LOGIN FUNCTIONS -------
-export const createSessionAction = async (existingUUID) => {
-    return await secureEmit('create-session', { existingUUID });
+export const createSessionAction = (existingUUID) => {
+    return secureEmit('create-session', { existingUUID });
 };
 
-export const joinSessionAction = async (roomID, existingUUID) => {
-    return await secureEmit('join-session', { roomID, existingUUID });
+export const joinSessionAction = (sessionID, existingUUID) => {
+    return secureEmit('join-session', { sessionID, existingUUID });
 };
 
 // ------- PROFILE FUNCTIONS --------
-export const updateUserAction = async (name, color) => {
-    return await secureEmit('update-user', { name, color });
+export const updateUserAction = (name, color) => {
+    return secureEmit('update-user', { name, color });
 };
 
 // ------  CHAT FUNCTIONS --------
-export const sendMessageAction = async (outboundData) => {
-    return await secureEmit('send-message', outboundData );
+export const sendMessageAction = (outboundData) => {
+    return secureEmit('send-message', outboundData );
 };
 
-export const editMessageAction = async (msgID, roomID, newText) => {
-    return await secureEmit('edit-message', { msgID, roomID, newText});
+export const editMessageAction = (msgID, chatRoomID, newText) => {
+    return secureEmit('edit-message', { msgID, chatRoomID, newText});
 };
 
-export const deleteMessageAction = async (msgID, roomID) => {
-    return await secureEmit('delete-message', { msgID, roomID});
+export const deleteMessageAction = (msgID, chatRoomID) => {
+    return secureEmit('delete-message', { msgID, chatRoomID});
 };
 
-export const typingAction = (roomID) => {
-    socket.emit('typing', { roomID });
+export const typingAction = (chatRoomID) => {
+    socket.emit('typing', { chatRoomID });
 };
 
-export const stopTypingAction = (roomID) => {
-    socket.emit('stop-typing', { roomID });
+export const stopTypingAction = (chatRoomID) => {
+    socket.emit('stop-typing', { chatRoomID });
 };
 
 // ------ MULTI-SCREEN FUNCTIONS ------
-export const leaveSessionAction = async (roomID) => {
-    return await secureEmit('leave-session', { roomID });
+export const leaveSessionAction = (sessionID) => {
+    return secureEmit('leave-session', { sessionID });
 };

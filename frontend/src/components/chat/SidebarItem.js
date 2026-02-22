@@ -8,7 +8,7 @@ import { useUser } from '../../context/UserContext';
 
 // logic helper, sorts userUUIDs in ascending order then joins with a '_' to keep it consistent
 // across both users
-const getRoomID = (id1, id2) => [id1, id2].sort().join('_');
+const getChatRoomID = (id1, id2) => [id1, id2].sort().join('_');
 
 // this doesn't need to constantly re-render, so we wrap it in React.memo
 // just visual component for each user in the sidebar list
@@ -50,7 +50,7 @@ export default function Sidebar({ isVisible, setIsSidebarVisible, navigation }) 
         setIsSidebarVisible(false);
 
         // create unique room id for both people
-        const DMroomID = getRoomID(userUUID, targetUser.uuid);
+        const DMroomID = getChatRoomID(userUUID, targetUser.uuid);
 
         // define the navigation parameters
         navigation.navigate('Chat', {
@@ -61,8 +61,8 @@ export default function Sidebar({ isVisible, setIsSidebarVisible, navigation }) 
     }, [userUUID, navigation, setIsSidebarVisible]);
     
     const renderUser = useCallback(( { item }) => {
-        const itemDmRoomId = getRoomID(userUUID, item.uuid);
-        const isUnread = unreadRooms.includes(itemDmRoomId);
+        const itemDMRoomID = getChatRoomID(userUUID, item.uuid);
+        const isUnread = unreadRooms.includes(itemDMRoomID);
 
         return (
             <SidebarItem

@@ -1,6 +1,6 @@
 // HomeScreen.js
-import React, { useState, useCallback } from 'react'; // useState lets app remember things (eg. messages), useEffect allows app to perform actions (eg. connecting ot the server) as soon as it opens
-import { Text, View, StatusBar, FlatList, Pressable, Button } from 'react-native'; // components; similar to HTML's tags <div> or <h1>, view = <div>, text for all strings
+import React, { useCallback } from 'react'; 
+import { Text, View, StatusBar, FlatList, Pressable, Button } from 'react-native'; 
 import TextTicker from 'react-native-text-ticker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -18,9 +18,9 @@ export default function HomeScreen({ navigation }) {
     // ---- STATE VARIABLES -----
     // app memory (state) to store the server's message
     // whenever "set" function is called, React Native automatically re-renders (refreshes) the screen to show the new info
-    const { name, selectedColor, sessionId, isHost, friends, socket, handleCleanExit } = useUser(); // Added socket here for the hiccup test
-    const { endSessionForAll, removeUser, handleTransferHost, leaveSession, leaveSessionAction } = useHomeLogic();  
-    const [showTransfer, setShowTransfer] = useState(false);
+    const { name, selectedColor, sessionId, isHost, friends, socket } = useUser(); // Added socket here for the hiccup test
+    const { endSessionForAll, removeUser, handleTransferHost, leaveSession, 
+        showTransfer, setShowTransfer } = useHomeLogic();  
 
     const insets = useSafeAreaInsets();
 
@@ -65,7 +65,7 @@ export default function HomeScreen({ navigation }) {
                 {/* ---- LEFT SLOT: LEAVE SESSION BUTTON,  ---- */}
                 <View style={{ width: 100, justifyContent: 'center' }}>
                     <Pressable 
-                        onPress={() => leaveSession(() => setShowTransfer(true))} 
+                        onPress={leaveSession} 
                         style={({ pressed }) => [
                             styles.headerButton,
                             styles.headerButtonDanger,
@@ -167,18 +167,7 @@ export default function HomeScreen({ navigation }) {
                 visible={showTransfer}
                 onClose={() => setShowTransfer(false)}
                 friends={friends}
-                onTransfer={async (selectedFriend) => {
-                    const confirmed = await handleTransferHost(selectedFriend);
-                    if (confirmed) {
-                        try {
-                            await leaveSessionAction(sessionId);
-                            setShowTransfer(false);
-                            handleCleanExit();
-                        } catch (err) {
-                            Alert.alert("Transfer failed", err.message);
-                        }
-                    }
-                }}
+                onTransfer={handleTransferHost}
             />
 
         </View>

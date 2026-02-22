@@ -12,11 +12,12 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
     // DATA & CONTEXT
     // ---------------------------------------------------------------------------------------------
     const { 
-        sessionId, socket,
-        name, userUUID, 
+        sessionID, socket,
+        name, userUUID, selectedColor,
         allMessages, setAllMessages, 
         desanitize, 
-        markAsRead,  unreadRooms 
+        markAsRead,  unreadRooms, 
+        formatMessageData, updateLocalMessage
     } = useUser();
     
     // ---------------------------------------------------------------------------------------------
@@ -37,7 +38,7 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
     // DERIVED CONSTANTS
     // ---------------------------------------------------------------------------------------------
     const COOLDOWN_MS = 500; // 0.5 seconds between messages
-    const currentRoomID = isDirectMessage ? DMroomID : sessionId;
+    const currentChatRoomID = isDirectMessage ? DMroomID : sessionID;
 
     // ---------------------------------------------------------------------------------------------
     // NAVIGATION & SYSTEM HANDLERS
@@ -57,57 +58,35 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
     // INTERNAL LOGIC HELPERS (private)
     // ---------------------------------------------------------------------------------------------
     // --- CREATE & STORE INITIAL MESSAGE LOCALLY ---
-    const addLocalMessage = (roomID, text) => {
+    const addLocalMessage = (chatRoomID, text) => {
         const msgID = Crypto.randomUUID();
         
+        
         const localMessageData = {
+            chatRoomID,
             msgID,
-            roomID,
-            context: { 
-                text, 
-                isEncrypted: false, 
-                version: "1.0" 
-            },
             senderUUID: userUUID,
             senderName: name, 
-            status: 'pending',
-            timestamp: Date.now() // Local timestamp for immediate sorting
+            color: selectedColor,
+            context: { text },
+            timestamp: Date.now(), // Local timestamp for immediate sorting
         };
+
+        const messageData = formatMessageData(localMessageData, 'pending');
+
 
         // Optimistic UI update
         // update local state so sender sees message instantly
         setAllMessages(prev => ({
             ...prev,
-            [roomID]: [localMessageData, ...(prev[roomID] || [])]
+            [chatRoomID]: [messageData, ...(prev[chatRoomID] || [])]
         }));
 
         return msgID; // Return this so the caller can update it later
     };
-    
-    // --- UPDATE LOCAL MESSAGE DATA ---
-    const updateLocalMessage = (targetRoomID, msgID, updates) => {
-        setAllMessages(prev => {
-            const roomToUpdate = targetRoomID || currentRoomID;
-            const roomMsgs = prev[roomToUpdate] || [];
-            // filter through messages based on roomID and find the one with matching msgID
-            return {
-                ...prev,
-                [roomToUpdate]: roomMsgs.map(m => {
-                    if (m.msgID === msgID) {
-                        // append updates, and if new text, update the context: text
-                        const { newText, ...otherUpdates } = updates;
-                        const updatedMsg = { ...m, ...otherUpdates };
-                        if (newText !== undefined) updatedMsg.context = { ...m.context, text: newText };
-                        return updatedMsg;
-                    }
-                    return m;
-                })
-            };
-        });
-    };
 
     // --- TYPING STATUS HELPER ---
-    const setTypingStatus = (status, roomID) => {
+    const setTypingStatus = (status, chatRoomID) => {
         // don't do anything if nothing has changed
         if (isTypingRef.current === status) return;
 
@@ -115,9 +94,9 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
         setIsTyping(status);
 
         if (status) {
-            typingAction(roomID);
+            typingAction(chatRoomID);
         } else {
-            stopTypingAction(roomID);
+            stopTypingAction(chatRoomID);
         }
     };
 
@@ -150,11 +129,11 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
     // ---------------------------------------------------------------------------------------------   
     // --- EDIT HANLDER  ---    
     const handleEditMessage = async (msgID, newText) => {
-        const roomID = currentRoomID;
+        const chatRoomID = currentChatRoomID;
         try {
-            await editMessageAction(msgID, roomID, newText);
+            await editMessageAction(msgID, chatRoomID, newText);
             
-            updateLocalMessage(roomID, msgID, {
+            updateLocalMessage(chatRoomID, msgID, {
                 isEdited: true,
                 newText: newText.trim(),
             });
@@ -166,11 +145,11 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
 
     // --- DELETE HANLDER  ---    
     const handleDeleteMessage = async (msgID) => {
-        const roomID = currentRoomID;
+        const chatRoomID = currentChatRoomID;
         try {
-            await deleteMessageAction(msgID, roomID);
+            await deleteMessageAction(msgID, chatRoomID);
 
-            updateLocalMessage(roomID, msgID, {
+            updateLocalMessage(chatRoomID, msgID, {
                 isDeleted: true,
                 newText: `${name} removed this message.`
             });
@@ -182,7 +161,7 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
 
     // --- SEND MESSAGE ---
     const sendMessage = async (retryText = null) => {
-        const roomID = currentRoomID; // if DM: Auuid_Buuid, if general: sessionId
+        const chatRoomID = currentChatRoomID; // if DM: Auuid_Buuid, if general: sessionID
         const textToSend = (retryText !== null ? retryText : message).trim();
         if (textToSend.length === 0) return;
         
@@ -190,18 +169,18 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
         if (retryText === null) {
             setMessage('');
             if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-            setTypingStatus(false, roomID)
+            setTypingStatus(false, chatRoomID)
         }
 
         // if user is spamming, block sendMessage and send alert to user
         if(!handleSpam()) return;
 
         // generate messageID, create and send message data locally 
-        const msgID = addLocalMessage(roomID, textToSend);
+        const msgID = addLocalMessage(chatRoomID, textToSend);
 
         const outboundData = {
             msgID,
-            roomID,
+            chatRoomID,
             context: { text: textToSend }
         };
 
@@ -209,40 +188,49 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
         try {
             const response = await sendMessageAction(outboundData);
             // if successfully emitted, update status to 'sent'
-            updateLocalMessage(roomID, msgID, { 
+            updateLocalMessage(chatRoomID, msgID, { 
                 status: 'sent', 
                 serverTimestamp: response.serverTimestamp || Date.now()
             });
         } catch (err) {
             // if failed to send, update status to 'failed'
-            console.error("Send failed: ", err.message);
-            updateLocalMessage(roomID, msgID, { status: 'failed' });
+            console.error("[SEND] failed: ", err.message);
+            try {
+                updateLocalMessage(chatRoomID, msgID, { status: 'failed' });
+            } catch (storageErr) {
+                console.error("[STATUS] update failed: ", storageErr.message);
+            }
         }
     };
 
     
     // --- RESEND FAILED MESSAGE ---
     const resendMessage = async (failedMsg) => {
-        const roomID = currentRoomID;
+        const chatRoomID = currentChatRoomID;
 
         if(!handleSpam()) return;
-
-        // set status to pending again
-        updateLocalMessage(roomID, failedMsg.msgID, { status: 'pending' });
         
         try {
+            // set status to pending again
+            updateLocalMessage(chatRoomID, failedMsg.msgID, { status: 'pending' });
+
             const response = await sendMessageAction({
                 msgID: failedMsg.msgID,
-                roomID,
+                chatRoomID,
                 context: { text: failedMsg.context.text }
             });
 
-            updateLocalMessage(roomID, failedMsg.msgID, {
+            updateLocalMessage(chatRoomID, failedMsg.msgID, {
                 status: 'sent',
                 serverTimestamp: response.serverTimestamp || Date.now()
             });
         } catch (err) {
-            updateLocalMessage(roomID, failedMsg.msgID, { status: 'failed' });
+            console.error("Resend failed: ", err.message);
+            try{
+                updateLocalMessage(chatRoomID, failedMsg.msgID, { status: 'failed' });
+            } catch (storageErr) {
+                console.error("[STATUS] update failed: ", storageErr.message);
+            }
         }
     };
 
@@ -253,23 +241,23 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
     // called in onTextChange for textInput
     const handleTextChange = (text) => {
         setMessage(text);
-        const roomID = currentRoomID;
+        const chatRoomID = currentChatRoomID;
         // clear inactivity timer
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
         // if input is cleared, remove the typing indicator
         if (text.trim().length === 0) {
             if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-            setTypingStatus(false, roomID);
+            setTypingStatus(false, chatRoomID);
             return;
         }
         // if user was not typing before and now the textinput changes, they must now be typing
         // show typing indicator
-        setTypingStatus(true, roomID);
+        setTypingStatus(true, chatRoomID);
 
         // always reset inactivity timer when the textinput changes
         typingTimeoutRef.current = setTimeout(() => {
-            setTypingStatus(false, roomID);
+            setTypingStatus(false, chatRoomID);
         }, 2000);
     };
 
@@ -335,9 +323,9 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
     // --- CLEAR UNREAD MESSAGES ---
     // clears when navigating to room with unread messages/in the room as they come in
     useEffect(() => {
-        markAsRead( isFocused ? currentRoomID : null);
+        markAsRead( isFocused ? currentChatRoomID : null);
         return () => markAsRead(null);
-    }, [currentRoomID, markAsRead, isFocused]);
+    }, [currentChatRoomID, markAsRead, isFocused]);
 
     // --- TYPING INDICATOR/EDITED & DELETED MESSAGES ---
     // listens for 'user-typing' and 'user-stop-typing' events
@@ -345,22 +333,33 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
     useEffect(() => {
         if (!socket) return;
 
-        const handleTyping = ( data ) => {
-            if (data.roomID === currentRoomID) {
-                setTypingUsers(prev => ({ ...prev, [data.senderUUID]: desanitize(data.senderName) }));
+        const handleTyping = ({ chatRoomID, senderUUID, senderName }) => {
+            try {
+                if (chatRoomID === currentChatRoomID) {
+                    setTypingUsers(prev => ({ ...prev, [senderUUID]: desanitize(senderName) }));
+                }
+            } catch (err) {
+                console.error("Typing handler error: ", err.message);
             }
         };
 
-        const handleStopTyping = ( data ) => {
-            setTypingUsers(prev => {
-                const newState = { ...prev };
-                delete newState[data.senderUUID]; // remove user from "typing" list
-                return newState;
-            });
+        const handleStopTyping = ({ senderUUID }) => {
+            try {
+                setTypingUsers(prev => {
+                    const newState = { ...prev };
+                    delete newState[senderUUID]; // remove user from "typing" list
+                    return newState;
+                });
+            } catch (err) {
+                console.error("Stop typing handler error: ", err.message);
+            }
         };
 
         socket.on('user-typing', handleTyping);
         socket.on('user-stop-typing', handleStopTyping);
+
+        // save latest chatroom in case user changes rooms quickly
+        const chatRoomIDToCleanup = currentChatRoomID;
 
         return () => {
             socket.off('user-typing', handleTyping);
@@ -385,10 +384,10 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
 
             // notify server we've stopped typing if applicable
             if (isTypingRef.current) {
-                stopTypingAction(currentRoomID);
+                stopTypingAction(chatRoomIDToCleanup);
             }
         };
-    }, [socket, currentRoomID]);
+    }, [socket, currentChatRoomID]);
 
     // ---------------------------------------------------------------------------------------------
     // PUBLIC API
@@ -396,15 +395,15 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
     return {
         message, setMessage,
         editingMessage, setEditingMessage,
-        messages: allMessages[currentRoomID] || [], 
+        messages: allMessages[currentChatRoomID] || [], 
         sendMessage, resendMessage,
         typingUsers, spamWarning,
         handleTextChange,
         cancelEditing, saveEdit, startEditing, 
         confirmDeletion,
         handleMessageLongPress,
-        sessionId, userUUID,
+        sessionID, userUUID,
         unreadRooms,
-        currentRoomID
+        currentChatRoomID
     };
 };

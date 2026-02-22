@@ -21,6 +21,7 @@ export default function ChatScreen({ navigation, route }) {
     const [isAtBottom, setIsAtBottom] = useState(true);
     
     const { isDirectMessage, DMroomID, recipientName = 'User' } = route.params || {};
+    const maxMsgLength = 500;
 
     const {
         message, messages,
@@ -30,7 +31,7 @@ export default function ChatScreen({ navigation, route }) {
         handleTextChange,
         cancelEditing, saveEdit, 
         handleMessageLongPress,
-        sessionId, userUUID,
+        sessionID, userUUID,
         unreadRooms
     } = useChatLogic({ isDirectMessage, DMroomID, navigation, isFocused });
 
@@ -84,7 +85,7 @@ export default function ChatScreen({ navigation, route }) {
                             ]}>
                             <Text style={{ color: '#007aff', fontSize: 25, fontWeight: '400', marginRight: 2 }}>❮</Text>
                             <Text style={{ color: '#007aff', fontSize: 17, fontWeight: '600' }}> Group</Text>
-                            {unreadRooms.includes(sessionId) && <View style={styles.unreadDotOverlap} />}
+                            {unreadRooms.includes(sessionID) && <View style={styles.unreadDotOverlap} />}
                         </Pressable>
                     )}
                 </View>
@@ -186,6 +187,7 @@ export default function ChatScreen({ navigation, route }) {
                         onSubmitEditing={() => editingMessage ? saveEdit() : sendMessage()}
                         returnKeyType="send"
                         placeholderTextColor="#838181"
+                        maxLength={maxMsgLength}
                         blurOnSubmit={false}
                     />
                     <Pressable

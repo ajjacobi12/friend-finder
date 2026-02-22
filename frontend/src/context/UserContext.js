@@ -20,7 +20,7 @@ export const UserProvider = ({ children }) => {
     const [selectedColor, setSelectedColor] = useState('#a0220c');
     const [hasRegistered, setHasRegistered] = useState(false);
     const [isConnected, setIsConnected] = useState(socket.connected);
-    const [sessionId, setSessionId] = useState(null);
+    const [sessionID, setSessionID] = useState(null);
     const [sessionUsers, setSessionUsers] = useState([]);
     const [friends, setFriends] = useState([]);
     const [isHost, setIsHost] = useState(false);
@@ -39,14 +39,14 @@ export const UserProvider = ({ children }) => {
     const activeRoomRef = useRef(currentActiveRoom);
     const showOverlayTimeoutRef = useRef(null);
 
-    const sessionIdRef = useRef(sessionId);
+    const sessionIDRef = useRef(sessionID);
     const isHostRef = useRef(isHost);
 
     const audioSource = require('../../assets/ding.mp3');
     const player = useAudioPlayer(audioSource);
 
-    // keep a ref to the latest sessionId for cleanup on disconnect
-    useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+    // keep a ref to the latest sessionID for cleanup on disconnect
+    useEffect(() => { sessionIDRef.current = sessionID; }, [sessionID]);
     useEffect(() => { isHostRef.current = isHost; }, [isHost]);
     useEffect(() => { activeRoomRef.current = currentActiveRoom; }, [currentActiveRoom]);
 
@@ -57,12 +57,13 @@ export const UserProvider = ({ children }) => {
             clearTimeout(reconnectTimeoutRef.current);
             reconnectTimeoutRef.current = null;
         }
-        setSessionId(null);
+        setSessionID(null);
         setSessionUsers([]);
         setFriends([]);
         setSelectedColor('#cccccc');
         setIsHost(false);
         setHasRegistered(false);
+        setIsReconnecting(false);
     }, []);
 
     // --- SHOW NOTIFICATION FUNCTION ---
@@ -122,9 +123,10 @@ export const UserProvider = ({ children }) => {
 
     // --- UNREAD MESSAGES ---
     // function called from chat.js when entering a room
-    const markAsRead = useCallback((roomID) => {
-        setCurrentActiveRoom(roomID);
-        setUnreadRooms(prev => prev.filter(id => id !== roomID));
+    const markAsRead = useCallback((chatRoomID) => {
+        activeRoomRef.current = chatRoomID;
+        setCurrentActiveRoom(chatRoomID);
+        setUnreadRooms(prev => prev.filter(roomID => roomID !== chatRoomID));
     }, []);
 
     // --- DESANITIZE INCOMING TEXT ---
@@ -136,6 +138,57 @@ export const UserProvider = ({ children }) => {
             .replace(/&gt;/g, ">")
             .replace(/&quot;/g, '"')
             .replace(/&#039;/g, "'");
+    };
+
+    // --- UPDATE LOCAL MESSAGE DATA ---
+    const updateLocalMessage = (chatRoomID, msgID, updates) => {
+
+        if (!chatRoomID || !msgID) {
+            throw new Error(`[STORAGE ERROR] Update failed: ${!chatRoomID ? 'chatRoomID' : 'msgID'} is missing.`);
+        }
+
+        setAllMessages(prev => {
+            const roomMsgs = prev[chatRoomID];
+            if(!roomMsgs || roomMsgs.length === 0) return prev;
+
+            // filter through messages based on chatRoomID and find the one with matching msgID
+            return {
+                ...prev,
+                [chatRoomID]: roomMsgs.map(m => {
+                    if (m.msgID === msgID) {
+                        // append updates, and if new text, update the context: text
+                        const { newText, serverTimestamp, ...otherUpdates } = updates;
+                        const updatedMsg = { ...m, ...otherUpdates };
+                        if (newText !== undefined) updatedMsg.context = { ...m.context, text: desanitize(newText) };
+                        if (serverTimestamp !== undefined) updatedMsg.timestamp = serverTimestamp;
+                        return updatedMsg;
+                    }
+                    return m;
+                })
+            };
+        });
+    };
+
+    const formatMessageData = (messageData, status) => {
+        const {
+            chatRoomID, msgID, senderUUID, senderName, color, context, 
+            serverTimestamp, timestamp,
+        } = messageData;
+
+        return {
+            chatRoomID,
+            msgID,
+            senderUUID,
+            senderName: desanitize(senderName),
+            color,
+            context: {
+                isEncrypted: false,
+                text: desanitize(context.text),
+                version: "1.0"
+            },
+            timestamp: serverTimestamp || timestamp || Date.now(),
+            status
+        };
     };
 
     // --- CONNECTION MANAGER ---
@@ -166,13 +219,42 @@ export const UserProvider = ({ children }) => {
             player.play();
         };
 
+        const joinSoundLogic = (newUsers, oldUsers) => {
+            if (newUsers.length > oldUsers.length && oldUsers.length !== 0) {
+                const joinedUser = newUsers.find(u => !oldUsers.some(p => p.uuid === u.uuid));
+                // notify only if joined user is not self
+                if (joinedUser && joinedUser.uuid !== userUUID) {
+                    playJoinSound();
+                    showNotification({ 
+                        title: `👤 ${joinedUser.name} `, 
+                        message: "has joined the session.",
+                        type: 'info'
+                    });
+                }
+            }
+        };
+
+        const leaveSoundLogic = (newUsers, oldUsers) => {
+            if (newUsers.length < oldUsers.length) {
+                const leftUser = oldUsers.find(p => !newUsers.some(u => u.uuid === p.uuid));
+                // notify only if left user is not self
+                if (leftUser) {
+                    showNotification({ 
+                        title: `👤 ${leftUser.name} `, 
+                        message: "has left the session.",
+                        type: 'info'
+                    });
+                }
+            }
+        };
+
         // --- HANDLERS ---
-        const onConnect = () => {
+        const onConnect = async () => {
             console.log("Connected", socket.id);
             setIsConnected(true);
             isConnectingRef.current = false;
 
-            // clear overlay immediately on connect
+            // clear overlay immediately on reconnect
             setIsReconnecting(false);
             if (showOverlayTimeoutRef.current) {
                 clearTimeout(showOverlayTimeoutRef.current);
@@ -180,25 +262,23 @@ export const UserProvider = ({ children }) => {
             }
 
             // silent rejoin logic
-            if (sessionIdRef.current && userUUID) {
-                console.log("Attempting silent rejoin for: ", sessionIdRef.current);
-                socket.emit('join-session', {
-                    roomID: sessionIdRef.current,
-                    existingUUID: userUUID
-                }, (response) => {
-                    if (response && response.exists) {
-                        console.log("Rejoin successful");
-                        if (response.alreadyRegistered) {
-                            setName(desanitize(response.userData.name));
-                            setSelectedColor(response.userData.color);
-                            setHasRegistered(true);
-                        } else {
-                            console.log("User still in setup phase, staying on Profile.");
-                        }
+            if (sessionIDRef.current && userUUID) {
+                console.log("[SILENT REJOIN] attempt for user ", userUUID);
+                try {
+                    const response = await joinSessionAction(sessionIDRef.current, userUUID);
+                    if (response.alreadyRegistered) {
+                        setName(desanitize(response.name));
+                        setSelectedColor(response.color);
+                        setIsHost(response.isHost);
+                        setHasRegistered(true);
+                        console.log("[SILENT REJOIN] success. Restored profile.");
                     } else {
-                        handleCleanExit();
+                        console.log("User still in setup phase, staying on Profile.");                       
                     }
-                });
+                } catch (err) {
+                    console.log("[SILENT REJOIN] unsuccessful: ", err.message);
+                    handleCleanExit();
+                }
             }
 
             if (reconnectTimeoutRef.current) {
@@ -208,7 +288,7 @@ export const UserProvider = ({ children }) => {
         };
 
         const onDisconnect = (reason) => {
-            console.log("Disconnected:", reason);
+            console.log("Disconnected: ", reason);
             setIsConnected(false);
 
             // if clean disconnect (server kicked us or we left),don't show overlay
@@ -219,7 +299,7 @@ export const UserProvider = ({ children }) => {
             // if accidental drop, start grace period
             // if 'io server disconnect', the server kicked us, so exit immediately
             // const isAccidental = reason == "transport close" || reason === "ping timeout";
-            if (sessionIdRef.current) {
+            if (sessionIDRef.current) {
                 // wait 1.5 seconds before showing "reconnecting" overlay
                 showOverlayTimeoutRef.current = setTimeout(() => {
                     setIsReconnecting(true);
@@ -237,108 +317,83 @@ export const UserProvider = ({ children }) => {
                 ...u,
                 name: desanitize(u.name)
             }));
-            // notify and play sound if someone joins
+
             setSessionUsers((prev) => {
-                // second check prevents notifications for initial join for user regarding others already in session
-                if (cleanUsers.length > prev.length && prev.length !== 0) {
-                    const joinedUser = cleanUsers.find(u => !prev.some(p => p.id === u.id));
-                    // notify only if joined user is not self
-                    if (joinedUser && joinedUser.id !== userUUID) {
-                        playJoinSound();
-                        showNotification({ 
-                            title: `👤 ${joinedUser.name} `, 
-                            message: "has joined the session.",
-                            type: 'info'
-                        });
-                    }
-                }
-                if (cleanUsers.length < prev.length) {
-                    const leftUser = prev.find(p => !cleanUsers.some(u => u.id === p.id));
-                    // notify only if left user is not self
-                    if (leftUser) {
-                        showNotification({ 
-                            title: `👤 ${leftUser.name} `, 
-                            message: "has left the session.",
-                            type: 'info'
-                        });
-                    }
-                }
+                joinSoundLogic(cleanUsers, prev);
+                leaveSoundLogic(cleanUsers, prev);
                 return cleanUsers;
             });
 
-            const otherUsers = cleanUsers.filter(u => u.id !== userUUID);
+            const otherUsers = cleanUsers.filter(u => u.uuid !== userUUID);
             setFriends(otherUsers);
         };
 
         // message appears immediately on sender's screen, then updates when the server confirms it
-        const onReceiveMessage = (messageData) => {
-            const desanitizedMessage = {
-                ...messageData,
-                sender: desanitize(messageData.sender),
-                context: {
-                    ...messageData.context,
-                    text: desanitize(messageData.context.text)
-                },
-                status: 'sent'
-            };
-
+        const onReceiveMessage = (inboundData) => {
+            const { chatRoomID, msgID } = inboundData;
+            const messageData = formatMessageData(inboundData, 'sent');
+ 
             setAllMessages(prev => {
-                const roomID = desanitizedMessage.roomID;
-                const roomMsgs = prev[roomID] || [];
-                // check if we already have a "local" version of this message
-                // look for message with same text/sender that doesn't have a server timestamp yet
-                // check if this is a message we sent that the server is returning
-                const existingMsgIndex = roomMsgs.findIndex(m => m.id === desanitizedMessage.id);
-                // if message is marked locally as failed, the server broadcast is arriving for message
+                const roomMsgs = prev[chatRoomID] || [];
+                const existingMsgIndex = roomMsgs.findIndex(m => m.msgID === msgID);
                 if (existingMsgIndex !== -1) {
+                    // check if we already have a "local" version of this message
+                    // theoretically this should never happen where we recieve a message we sent, but who knows
                     const updatedMsgs = [...roomMsgs];
                     updatedMsgs[existingMsgIndex] = {
                         ...roomMsgs[existingMsgIndex],
-                        ...desanitizedMessage,
-                        status: 'sent'
+                        ...messageData,
                     };
-                    return { ...prev, [roomID]: updatedMsgs };
+                    return { ...prev, [chatRoomID]: updatedMsgs };
                 }
                 // otherwise, just add the new message
                 return {
                     ...prev,
-                    [roomID]: [desanitizedMessage, ...roomMsgs]
+                    [chatRoomID]: [messageData, ...roomMsgs]
                 };
             });
 
             // unread logic
             // console.log("activeRoomRef.current: ", activeRoomRef.current);
-            // console.log("messageData.roomID: ", messageData.roomID);
-            if (desanitizedMessage.roomID !== activeRoomRef.current) {
+            // console.log("messageData.chatRoomID: ", messageData.chatRoomID);
+            if (chatRoomID !== activeRoomRef.current) {
                 setUnreadRooms(prev => {
                     // if the room is already in unread list, do nothing
-                    if (prev.includes(desanitizedMessage.roomID)) return prev;
+                    if (prev.includes(chatRoomID)) return prev;
                     // otherwise add it to the list
-                    return [...prev, desanitizedMessage.roomID];
+                    return [...prev, chatRoomID];
                 });
-                const isDM = desanitizedMessage.roomID.includes('_');
+                const isDM = chatRoomID.includes('_');
                 showNotification({ 
-                    title: isDM ? (`👤 ${desanitizedMessage.sender}`) : (`💬 ${desanitizedMessage.sender}`), 
-                    message: desanitizedMessage.context.text,
-                    roomID: desanitizedMessage.roomID,
+                    title: isDM ? (`👤 ${messageData.senderName}`) : (`💬 ${messageData.senderName}`), 
+                    message: messageData.context.text,
+                    chatRoomID: chatRoomID,
                     isDM: isDM,
                     type: 'info'
                 });
             }
         };
 
-        const handleDeletedByOthers = ( data ) => {  
-            updateLocalMessage(data.roomID, data.msgID, {
-                isDeleted: true,
-                newText: `${desanitize(data.senderName)} removed this message.`
-            });
+        const handleDeletedByOthers = ( chatRoomID, msgID, senderName ) => {  
+            try {
+                updateLocalMessage(chatRoomID, msgID, {
+                    isDeleted: true,
+                    newText: `${desanitize(senderName)} removed this message.`
+                });
+            } catch (err) {
+                console.log("[MSG] deletion error, ", err.message);
+            }
         };
 
-        const handleEditedByOthers = ( data ) => {
-            updateLocalMessage(data.roomID, data.msgID, { 
-                isEdited: true,
-                newText: desanitize(data.newText)  
-            });
+        const handleEditedByOthers = ( chatRoomID, msgID, newText ) => {
+            try {
+                updateLocalMessage(chatRoomID, msgID, { 
+                    isEdited: true,
+                    newText: desanitize(newText)  
+                });
+            } catch (err) {
+                console.log("[MSG] edit error, ", err.message);
+            }
         };
 
         const onSessionEnded = () => {
@@ -391,13 +446,16 @@ export const UserProvider = ({ children }) => {
         };
     }, [socket, userUUID, showNotification, handleCleanExit]); 
 
+    const value = useMemo(() => ({
+        name, setName, selectedColor, setSelectedColor, hasRegistered, 
+        setHasRegistered, socket, isConnected, sessionID, setSessionID, sessionUsers, setSessionUsers,
+        handleCleanExit, isHost, setIsHost, allMessages, setAllMessages, justCreatedSession, userUUID, setUserUUID,
+        unreadRooms, setUnreadRooms, markAsRead, friends, setFriends, desanitize, isReconnecting, updateLocalMessage,
+        formatMessageData
+    }), [name, selectedColor, hasRegistered, isConnected, sessionID, sessionUsers, isHost, isReconnecting, allMessages, userUUID, friends, handleCleanExit, markAsRead]);
+
     return (
-        <UserContext.Provider value={{
-            name, setName, selectedColor, setSelectedColor, hasRegistered, 
-            setHasRegistered, socket, isConnected, sessionId, setSessionId, sessionUsers, setSessionUsers,
-            handleCleanExit, isHost, setIsHost, allMessages, setAllMessages, justCreatedSession, userUUID, setUserUUID,
-            unreadRooms, setUnreadRooms, markAsRead, friends, setFriends, desanitize, isReconnecting
-        }}>
+        <UserContext.Provider value={value}>
             {children}
 
             {notification && (
@@ -413,12 +471,12 @@ export const UserProvider = ({ children }) => {
                     <TouchableOpacity
                         activeOpacity={0.9}
                         onPress={() => { 
-                            const { roomID, isDM, title } = notification;
+                            const { chatRoomID, isDM, title } = notification;
                             setNotification(null);
-                                if (roomID)    {
+                                if (chatRoomID)    {
                                     navigationRef.navigate('Chat', { 
                                         isDirectMessage: isDM,
-                                        DMroomID: isDM ? roomID : null,
+                                        DMroomID: isDM ? chatRoomID : null,
                                         recipientName: isDM ? title.replace('👤 ', '').replace('💬 ', '') : undefined,
                                     });
                                 }

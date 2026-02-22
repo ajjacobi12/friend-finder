@@ -10,7 +10,7 @@ const MessageItem = React.memo(({ item, userUUID, onLongPress, onResend, editTim
         senderUUID, senderName, 
         context, 
         status, 
-        serverTimestamp, timestamp, 
+        timestamp, 
         isDeleted, isEdited 
     } = item;
 
@@ -23,7 +23,7 @@ const MessageItem = React.memo(({ item, userUUID, onLongPress, onResend, editTim
         if (isFailed || isPending || isDeleted) return; 
 
         // only allow edits/deletes on own messages within time limit
-        const baseTime = serverTimestamp || timestamp || Date.now();
+        const baseTime = timestamp || Date.now();
         const isWithinTime = Date.now() - baseTime < editTimeLimit;
         const canEdit = isMine && !isDeleted && isWithinTime;
 
@@ -45,8 +45,8 @@ const MessageItem = React.memo(({ item, userUUID, onLongPress, onResend, editTim
             {/* --- SENDER & TIMESTAMP --- */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontWeight: 'bold', color: '#555', fontSize: 12 }}>
-                    {isMine ? 'You' : (senderName)} • { serverTimestamp
-                        ? new Date(serverTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    {isMine ? 'You' : (senderName)} • { timestamp
+                        ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                         : isMine ? (isFailed ? "Failed" : "Sending...") : "Just now" }
                 </Text>
             </View>

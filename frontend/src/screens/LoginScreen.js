@@ -98,7 +98,7 @@ export default function LoginScreen( { navigation }) {
             <StatusBar barStyle="dark-content" />
 
             <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-            <View style={{ flex: 1, alignItems: 'flex-start', justifyContent: 'center', width: width }}>
+            <View style={{ flex: 1, alignItems: 'flex-start', justifyContent: 'center' }}>
 
                 <Animated.View style={{
                     flexDirection: 'row',

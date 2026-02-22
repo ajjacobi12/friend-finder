@@ -11,7 +11,7 @@ export const useProfileLogic = ({ navigation, colorOptions }) => {
     const { 
         name, setName, 
         selectedColor, setSelectedColor, 
-        friends, sessionId,
+        friends, sessionID,
         hasRegistered, setHasRegistered, 
         handleCleanExit 
     } = useUser();
@@ -66,11 +66,11 @@ export const useProfileLogic = ({ navigation, colorOptions }) => {
     // --- BACK CLEANUP HELPER ---
     const performLeaveCleanup = useCallback(() => {
         Keyboard.dismiss();
-        if (sessionId) {
-            leaveSessionAction(sessionId).catch(() => {});
+        if (sessionID) {
+            leaveSessionAction(sessionID).catch(() => {});
         }
         handleCleanExit();
-    }, [sessionId, handleCleanExit]);
+    }, [sessionID, handleCleanExit]);
 
     // --- BACK BUTTON TO LOGIN ---
     const handleBack = () => {
@@ -86,7 +86,7 @@ export const useProfileLogic = ({ navigation, colorOptions }) => {
         }
         else {
             handleBack();
-            return false;
+            return true;
         }
     }, [hasRegistered, navigation, handleBack]);
     useSessionBackHandler(onLeaveProfile);
@@ -101,7 +101,7 @@ export const useProfileLogic = ({ navigation, colorOptions }) => {
         });
 
         return unsubscribe;
-    }, [navigation, hasRegistered, sessionId]);
+    }, [navigation, hasRegistered, sessionID]);
 
     // --- REMEMBER PREVIOUS NAME ENTERED ----
     useEffect(() => {
@@ -112,12 +112,14 @@ export const useProfileLogic = ({ navigation, colorOptions }) => {
 
     // --- SET INITIAL JOIN COLOR -----
     useEffect(() => {
-        const takenColors = friends.map(f => f.color);
-        if (!selectedColor || takenColors.includes(selectedColor)) {
-            const firstAvailable = colorOptions.find(color => !takenColors.includes(color));
-            if (firstAvailable) setSelectedColor(firstAvailable);
+        if (!hasRegistered) {
+            const takenColors = friends.map(f => f.color);
+            if (!selectedColor || takenColors.includes(selectedColor)) {
+                const firstAvailable = colorOptions.find(color => !takenColors.includes(color));
+                if (firstAvailable) setSelectedColor(firstAvailable);
+            }
         }
-    }, [friends]);
+    }, [friends, hasRegistered]);
     
     // --- SAVE USERNAME WHEN SWITCHING TABS ---
     useFocusEffect(
@@ -148,7 +150,7 @@ export const useProfileLogic = ({ navigation, colorOptions }) => {
         name,
         selectedColor, setSelectedColor,
         hasRegistered, setHasRegistered,
-        friends, sessionId
+        friends, sessionID
     };
 
 }
