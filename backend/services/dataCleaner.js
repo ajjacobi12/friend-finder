@@ -3,9 +3,10 @@
 const { z } = require('zod');
 const DOMPurify = require('isomorphic-dompurify');
 
-// no HTML allowed at all
+// --- HELPERS ---
+// sanitization
 const sanitizeStrict = (val) => {
-    if (!val) return "";
+    if (!val || typeof val !== 'string') return "";
     return DOMPurify.sanitize(val, {
         ALLOWED_TAGS: [],
         ALLOWED_ATTR: [],
@@ -13,12 +14,17 @@ const sanitizeStrict = (val) => {
     }).trim();
 };
 
-// --- SCHEMAS ---
+// ------------------------- SCHEMAS -----------------------
+
+// ------- USER SPECIFIC -----------
+// user UUID: 
+const userUUIDSchema = z.string().uuid();
 
 // sessionID: 6 characters, uppercase, alphanumeric
 const SessionIDSchema = z.string()
     .length(6)
-    .transform(val => val.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+    .toUpperCase()
+    .regex(/^[A-Z0-9]+$/);
 
 // User Profile: name: 1-15 characters, hex color, and privacy settings
 const UserProfileSchema = z.object({
@@ -28,30 +34,32 @@ const UserProfileSchema = z.object({
     // fineLocation: z.boolean().optional().default(true),
 });
 
+// ------- CHAT SPECIFIC -----------
+// chatRoomID: 6 char sessionID or UUID_UUID
+const DMPattern = z.string().regex(/^[a-f0-9-]{36}_[a-f0-9-]{36}$/i); // UUID_UUID
+const ChatRoomIDSchema = z.union([SessionIDSchema, DMPattern]);
+
+// messageID: uuid
+const msgIDSchema = z.string().uuid();
+
 // Chat Messages: no empty strings, max 500 characters
-const TextSchema = z.string().min(1).max(500).transform(sanitizeStrict);
+const MessageTextSchema = z.string().min(1).max(500).transform(sanitizeStrict);
 
+// message context: contains text; isEncrypted is boolean, default = false; version default = "1.0"
 const MessageContextSchema = z.object({
-    text: TextSchema,
+    text: MessageTextSchema,
     isEncrypted: z.boolean().default(false),
-    version: z.string().default("1.0").transform(sanitizeStrict)
+    version: z.string().regex(/^[0-9.]+$/).default("1.0")
 });
-
-// for DMS: chatRoomID is UUID_UUID
-const ChatRoomIDSchema = z.string().min(6).max(100);
-
-const msgIDSchema = z.string().uuid().optional();
 
 // --- EXPORTED CLEANER ---
 const clean = {
-    // basic string cleaner for sessionIDs, names, and general text
-    text: (input) => {
-        if (!input || typeof input !== 'string') return '';
-        // DOMPurify.sanitize returns a clean string
-        return DOMPurify.sanitize(input, plainTextConfig).trim();
+    // ---- user specific ----
+    userUUID: (id) => {
+        const result = userUUIDSchema.safeParse(id);
+        return result.success ? result.data : null;
     },
 
-    // must be uppercase, alphanumeric, and 6 chars
     sessionID: (id) => {
         const result = SessionIDSchema.safeParse(id);
         return result.success ? result.data : null;
@@ -62,8 +70,19 @@ const clean = {
         return result.success ? result.data : null;
     },
 
-    message: (msg) => {
-        const result = MessageSchema.safeParse(msg);
+    // ---- chat specific ----
+    chatRoom: (id) => {
+        const result = ChatRoomIDSchema.safeParse(id);
+        return result.success ? result.data : null;
+    },
+
+    msgID: (id) => {
+        const result = msgIDSchema.safeParse(id);
+        return result.success ? result.data : null;
+    },
+
+    messageText: (msg) => {
+        const result = MessageTextSchema.safeParse(msg);
         return result.success ? result.data : null;
     },
 
@@ -71,11 +90,6 @@ const clean = {
         const result = MessageContextSchema.safeParse(msgContext);
         return result.success ? result.data : null;
     },
-    
-    chatRoom: (id) => {
-        const result = ChatRoomIDSchema.safeParse(id);
-        return result.success ? result.data : null;
-    }
 };
 
 module.exports = clean;

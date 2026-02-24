@@ -27,9 +27,43 @@ const {
     handleSessionCleanup, ensureHostExists
 } = require('./services/sessionService')(io, activeUsers, activeSessions, socketToUUID)
 const clean = require('./services/dataCleaner');
-const { handleEvent, getChatRoomData } = require('./services/serverUtils');
+const { handleEvent, checkCleanData, getChatRoomData } = require('./services/serverUtils');
 
 const maxSessionCapacity = 12;
+
+// --- IDENTITY MIDDLEWARE ---
+io.use((socket, next) => {
+    // get identifiers from the 'auth' handshake
+    const { userUUID, sessionID } = socket.handshake.auth;
+
+    // clean them
+    const cleanUserUUID = clean.userUUID(userUUID);
+    const cleanSessionID = clean.sessionID(sessionID);
+
+    // if missing/incorrect, still let user connect for create/join, but don't attach "verified" badge
+    if (cleanUserUUID && activeUsers[cleanUserUUID]) {
+        const user = activeUsers[cleanUserUUID];
+
+        // verify user belongs to session
+        const isUserInSession = user.sessionID === cleanSessionID;
+        // future: const isUserInSession = user.sessionID.includes(cleanSessionID);
+
+        if (isUserInSession) {
+            // attach verified data directly to socket object
+            socket.userUUID = cleanUserUUID;
+            socket.user = user;
+            socket.sessionID = cleanSessionID;
+            
+            // update mapping
+            socketToUUID[socket.id] = cleanUserUUID;
+            console.log(`[AUTH] ${user.name} verified for session ${cleanSessionID}`);
+        } else {
+            console.log(`[AUTH] Warning: ${user.name} tried to access unauthorized session ${cleanSessionID}`);
+        }
+    }
+
+    next(); // lets connection proceed
+});
 
 // 3. handle live connections
 io.on('connection', (socket) => { // an event listener -- waits for user to open the app, and when opened, it triggers a function that gives that specific user a unique "socket" object (their personal "phone line" to the server)
@@ -38,17 +72,29 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
     console.log(`New user connected: ${socket.id}`);
  
     // ---- CREATE SESSION -----
-    socket.on('create-session', handleEvent(async ({ existingUUID }, cb) => {
-        const sessionID = generateUniqueCode();
-        const user = handleUserJoiningSession(socket, sessionID, existingUUID);
-        console.log(`Session Created: ${sessionID} for user: ${user.uuid}`);
+    socket.on('create-session', handleEvent(socket, ['isPublic'], async ({ existingUUID = null }, cb) => {
+        // protocol guard
+        if (existingUUID !== null && !existingUUID) throw new Error("Protocol error: missing existingUUID");
+
+        // generate sessionID, clean data
+        const rawSessionID = generateUniqueCode();
+        const cleanSessionID = clean.sessionID(rawSessionID);
+        const cleanExistingUUID = existingUUID ? clean.userUUID(existingUUID) : null;
+
+        // system guards
+        checkCleanData('CREATE SESSION', { cleanSessionID, ...(existingUUID && { cleanExistingUUID }) })
+
+        const user = handleUserJoiningSession(socket, cleanSessionID, cleanExistingUUID);
+        if (!user) throw new Error("Protocol error: unable to create user for new session");
+
+        console.log(`Session Created: ${cleanSessionID} for user: ${user.uuid}`);
 
         // return new UUID so phone can store it
         cb({ 
             success: true, 
             exists: true,
             full: false,
-            sessionID: sessionID, 
+            sessionID: cleanSessionID, 
             userUUID: user.uuid,
             alreadyRegistered: false, 
             isHost: user.isHost || false,
@@ -59,24 +105,35 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
     }));
 
     // ---- JOIN A SESSION ----
-    socket.on('join-session', handleEvent(async ({ sessionID, existingUUID = null }, cb) => {
+    socket.on('join-session', handleEvent(socket, ['sessionID', 'isPublic'], async ({ sessionID, existingUUID = null }, cb) => {
+        // protocol guard
+        if (existingUUID !== null && !existingUUID) throw new Error("Protocol error: missing existingUUID");
+
+        // data cleaning
         const cleanSessionID = clean.sessionID(sessionID);
-        // ensure sessionID was passed & session exists
-        if (!cleanSessionID) return cb({ success: false, error: "No session code provided." });
-        if(!activeSessions[cleanSessionID]) return cb({ success: false, exists: "Session does not exist." });
+        const cleanExistingUUID = existingUUID ? clean.userUUID(existingUUID) : null;
+
+        // system guards
+        checkCleanData(`JOIN SESSION`, { cleanSessionID, ...(existingUUID && { cleanExistingUUID }) });
+
+        if(!activeSessions[cleanSessionID]) {
+            return cb({ success: false, exists: "Session does not exist." });
+        }
 
         // check capacity and returning user status 
         const usersInSession = Object.values(activeUsers).filter(u => u.sessionID === cleanSessionID);          
-        const isReturningUser = !!(existingUUID && activeUsers[existingUUID] && activeUsers[existingUUID].sessionID === cleanSessionID);
-
-        // checks to see if session is full (skip if a returning user)
+        const isReturningUser = !!(cleanExistingUUID && activeUsers[cleanExistingUUID] && activeUsers[cleanExistingUUID].sessionID === cleanSessionID);
         if(usersInSession.length >= maxSessionCapacity && !isReturningUser) {
             return cb({ success: false, error: "Session is full." });
         } 
 
         // everything is good, join and check to see if they are returning 
         // based on default color & name
-        const user = handleUserJoiningSession(socket, cleanSessionID, existingUUID);
+        const user = handleUserJoiningSession(socket, cleanSessionID, cleanExistingUUID);
+        if (!user) throw new Error("Protocol error: unable to create user for new session");
+
+        const finalUsersList = Object.values(activeUsers).filter(u => u.sessionID === cleanSessionID);          
+
         const alreadyRegistered = !!(user && user.isFullyRegistered);
         console.log(`[JOIN] Session: ${cleanSessionID} | User: ${user.uuid} | Returning: ${alreadyRegistered}`);
         cb({ 
@@ -87,38 +144,32 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
             userUUID: user.uuid,
             alreadyRegistered,
             isHost: user.isHost || false,
-            currentUsers: usersInSession,
+            currentUsers: finalUsersList,
             name: user.name,
             color: user.color
         });
     }));
 
     // ---- UPDATE PROFILE -----
-    socket.on('update-user', handleEvent(async (profile, cb) => {
-        // profile: name, color
-        const userUUID = socketToUUID[socket.id];
-        const user = activeUsers[userUUID];
-
-        // if we can't find user, don't try and update them
-        if (!userUUID || !user)   {
-            throw new Error(`[UPDATE] failed: no UUID found for socket ${socket.id}`);
-        }
-
-        // validate profile
+    socket.on('update-user', handleEvent(socket, ['profile'], async ({ profile }, cb) => {
+        // (profile: name, color)
+        // obtain and clean necessary data
+        const { user, userUUID, sessionID } = socket;
         const cleanProfile = clean.userProfile(profile);
-        if (!cleanProfile) {
-            return cb({ success: false, error: "Invalid name or color format." });
-        }
+
+        // system guards
+        checkCleanData(`UPDATE USER`, { cleanProfile });
+
+        // destructure cleanProfile
+        const { name, color } = cleanProfile;
 
         // color taken logic
-        const sessionID = user.sessionID;
         const isColorTaken = Object.values(activeUsers).some(
-            u => u.sessionID === sessionID && u.uuid !== userUUID && u.color === profile.color
+            u => u.sessionID === sessionID && u.uuid !== userUUID && u.color === color
         );
         if (isColorTaken) {
             return cb({ success: false, error: "Color was just taken. Please choose another."});
         }
-
 
         activeUsers[userUUID] = { 
             ...user, 
@@ -127,51 +178,54 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
         };
 
         cb({ success: true });
-        broadcastUpdate(sessionID, `User ${cleanProfile.name} updated their profile.`);
+        broadcastUpdate(sessionID, `User ${name} updated their profile.`);
     }));
 
     // --- CASE 1: user voluntarily leaves session (exit session)
-    socket.on('leave-session', handleEvent(async ({ sessionID }, cb) => {
-        const userUUID = socketToUUID[socket.id];
-        const user = activeUsers[userUUID];
-
+    socket.on('leave-session', handleEvent(socket, ['sessionID', 'isPublic'], async ({ sessionID }, cb) => {
+        // obtain and clean necessary data
+        const { user, userUUID } = socket;
+        const cleanSessionID = clean.sessionID(sessionID);
+        
         // if user is gone from records, do nothing
         if (!user) return cb({ success: true });
 
-        const userName = user.name || "Unknown User";
+        // system guards
+        checkCleanData(`LEAVE SESSION`, { cleanSessionID });
+
+        if (user.sessionID !== cleanSessionID) throw new Error (`User is not in session ${cleanSessionID}.`);
 
         // if user was the host, pick a new one
-        if (user.isHost === true) ensureHostExists(sessionID, userUUID);
+        if (user.isHost === true) ensureHostExists(cleanSessionID, userUUID);
 
         // delete user data & remove sockets
         delete activeUsers[userUUID];  
         delete socketToUUID[socket.id];
-        socket.leave(sessionID);
+        socket.leave(cleanSessionID);
         socket.leave(userUUID);
 
         cb({ success: true });
-
-        broadcastUpdate(sessionID, `User ${userName} left.`);
+        broadcastUpdate(cleanSessionID, `User ${user.name || "Unknown User"} left.`);
         
         // check if session is now empty
         setTimeout(() => {
-            handleSessionCleanup(sessionID);
+            handleSessionCleanup(cleanSessionID);
         }, 50);         
     }));
 
     // ---- CASE 2: DISCONNECT (eg. unexpected exits, closing the app) ----------
     socket.on('disconnect', () => { 
-        const userUUID = socketToUUID[socket.id];
-        const user = activeUsers[userUUID];
+        const { user, userUUID, sessionID } = socket;
 
-        if (!user) return;
+        // system/protocol guards
+        if (!user || !userUUID || !sessionID) return;
 
-        const sessionID = user.sessionID;
         const userName = user.name || "Unknown User";
+
         console.log(`[BLINK] User ${userName} disconnected. Waiting for grace period...`);
 
         // immediate UI cleanup, stop anytyping indicaters
-        socket.broadcast.emit('user-stop-typing', { senderUUID: userUUID });
+        socket.to(sessionID).emit('user-stop-typing', { senderUUID: userUUID });
         
         // remove old socket mapping since upon reconnection they will be give a new socket.id
         delete socketToUUID[socket.id];
@@ -202,24 +256,27 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
     });
 
     // --- CASE 3: Host ends session for everyone ----
-    socket.on('end-session', handleEvent(async ({ sessionID }, cb) => {
-        const senderUUID = socketToUUID[socket.id];
-        const sender = activeUsers[senderUUID];
+    socket.on('end-session', handleEvent(socket, ['sessionID'], async ({ sessionID }, cb) => {
+        // obtain and clean necessary data
+        const { user } = socket;
+        const cleanSessionID = clean.sessionID(sessionID);
 
-        // only host allowed to nuke the session
-        if (!sender || !sender.isHost) {
-            throw new Error(`Unauthorized attempt by ${sender.name || socket.id} to end session.`);
-        }
+        // system guards
+        checkCleanData(`END SESSION`, { cleanSessionID });
 
-        console.log(`Host ${sender.name} is ending session ${sessionID}`);
-        io.to(sessionID).emit('session-ended');
+        if (!user.isHost) throw new Error(`Unauthorized attempt by ${user.name || socket.id} to end session.`);
 
-        const session = io.sockets.adapter.rooms.get(sessionID);
+        // notify everyone session ended, start cleanup on frontend for all users
+        console.log(`Host ${user.name} is ending session ${cleanSessionID}`);
+        io.to(cleanSessionID).emit('session-ended');
+
+        // delete all users' data in session
+        const session = io.sockets.adapter.rooms.get(cleanSessionID);
         session?.forEach(socketID => {
             const socketObject = io.sockets.sockets.get(socketID);
             const userUUID = socketToUUID[socketID];
 
-            socketObject?.leave(sessionID);
+            socketObject?.leave(cleanSessionID);
             if (userUUID) socketObject?.leave(userUUID); 
             delete socketToUUID[socketID];
             delete activeUsers[userUUID];
@@ -227,42 +284,40 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
 
         // remove session from active sessions, 
         // clear the session deletion timer if it exists
-        delete activeSessions[sessionID];
-        cancelSessionDeletion(sessionID);
+        delete activeSessions[cleanSessionID];
+        cancelSessionDeletion(cleanSessionID);
 
         cb({ success: true });
-        console.log(`Session ${sessionID} fully purged.`);
+        console.log(`Session ${cleanSessionID} fully purged.`);
     }));
 
     // --- CASE 4: host removes a specific user ---
-    socket.on('remove-user', handleEvent(async ({sessionID, userUUIDToRemove}, cb) => {
-        const senderUUID = socketToUUID[socket.id];
-        const sender = activeUsers[senderUUID];
+    socket.on('remove-user', handleEvent(socket, ['sessionID', 'userUUIDToRemove'], async ({ sessionID, userUUIDToRemove }, cb) => {
+        // obtain and clean necessary data
+        const { user } = socket;
         const cleanSessionID = clean.sessionID(sessionID);
+        const cleanUserUUIDToRemove = clean.userUUID(userUUIDToRemove);
 
-        // only host can kick people 
-        if (!sender || !sender.isHost) {
-            throw new Error(`Unauthorized attempt by ${sender.name || `User`} to remove user.`);
-        }
+        // system guards
+        checkCleanData(`REMOVE USER`, { cleanSessionID, cleanUserUUIDToRemove });
 
-        // find victim
-        const targetUser = activeUsers[userUUIDToRemove];
-        // if aren't in activeUsers they're already gone
-        if (!targetUser) {
-            return cb({ success: true });
-        }
+        if (!user.isHost) throw new Error(`[REMOVE USER] Unauthorized attempt by ${user.name || `User`} to remove user.`);
+
+        // find victim, if they aren't in activeUsers they're already gone
+        const targetUser = activeUsers[cleanUserUUIDToRemove];
+        if (!targetUser) return cb({ success: true });
 
         // force victim socket to leave session
         const targetSocket = io.sockets.sockets.get(targetUser.socketID);
         if (targetSocket) {
             targetSocket.emit('removed-from-session'); 
             targetSocket.leave(cleanSessionID); 
-            targetSocket.leave(userUUIDToRemove);
+            targetSocket.leave(cleanUserUUIDToRemove);
         }
 
         // cleanup & notify
         delete socketToUUID[targetUser.socketID];
-        delete activeUsers[userUUIDToRemove]; 
+        delete activeUsers[cleanUserUUIDToRemove]; 
 
         cb({ success: true });
         broadcastUpdate(cleanSessionID, `User (${targetUser.name || `User`}) was removed by the host.`);
@@ -270,29 +325,27 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
     }));
 
     // --- TRANSFER HOST STATUS ----
-    socket.on('transfer-host', handleEvent(async ({sessionID, newHostUUID}, cb ) => {
-        const senderUUID = socketToUUID[socket.id];
-        const sender = activeUsers[senderUUID];
+    socket.on('transfer-host', handleEvent(socket, ['sessionID', 'newHostUUID'], async ({ sessionID, newHostUUID }, cb ) => {
+        // obtain and clean necessary data
+        const { user } = socket;
         const cleanSessionID = clean.sessionID(sessionID);
+        const cleanNewHostUUID = clean.userUUID(newHostUUID);
 
-        // console.log("Incoming transfer-host request:", { sessionID, newHostUUID, senderUUID, sender });
-        // console.log("Current activeUsers state:", JSON.stringify(activeUsers, null, 2));
-        
-        // only host can transfer power
-        if (!sender || !sender.isHost ) {
-            throw new Error(`[HOST] Unauthorized transfer attempt by ${sender?.name || socket.id}`);
-        }
+        // system guards
+        checkCleanData(`TRANSFER HOST`, { cleanSessionID, cleanNewHostUUID });
 
-        // verify new host exists in session
-        const targetUser = activeUsers[newHostUUID];
+        if (!user.isHost ) throw new Error(`[TRANSFER HOST] Unauthorized transfer attempt by ${user?.name || socket.id}`);
+
+        const targetUser = activeUsers[cleanNewHostUUID];
         if (!targetUser || targetUser.sessionID !== cleanSessionID) {
-            throw new Error(`[HOST] Transfer failed: target user ${newHostUUID} not found in session.`);
+            throw new Error(`[TRANSFER HOST] Transfer failed: target user ${cleanNewHostUUID} not found in session.`);
         }
 
-        sender.isHost = false;
+        // change host status of both users
+        user.isHost = false;
         targetUser.isHost = true;
 
-        io.to(cleanSessionID).emit('host-change', newHostUUID);
+        io.to(cleanSessionID).emit('host-change', cleanNewHostUUID);
         cb({ success: true });
         broadcastUpdate(cleanSessionID, `${targetUser.name} is now the host.`);
     }));
@@ -312,126 +365,122 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
         serverTimestamp: Date.now()
     });
 
-    socket.on('send-message', handleEvent(async (messageData, cb) => {
-        const senderUUID = socketToUUID[socket.id];
-        const sender = activeUsers[senderUUID];
-
-        const cleanContext = clean.messageContext(messageData.context);
-        const cleanChatRoomID = clean.chatRoom(messageData.chatRoomID);
-
-        const { msgID, context } = messageData;
+    socket.on('send-message', handleEvent(socket, ['msgID', 'chatRoomID', 'context'], async ({ msgID, chatRoomID, context }, cb) => {
+        // obtain and clean necessary data
+        const { user, userUUID } = socket;
+        const cleanChatRoomID = clean.chatRoom(chatRoomID);
+        const cleanMsgID = clean.msgID(msgID);
+        const cleanContext = clean.messageContext(context);
 
         // console.log("data being sent: ", messageData);
 
-        // validate the message, don't process empty data
-        if (!sender || !cleanChatRoomID || !cleanContext) {
-            return cb({ success: false, error: "Invalid message or session expired." });
-        }
+        // system guards
+        checkCleanData(`SEND MSG`, { cleanChatRoomID, cleanMsgID, cleanContext });
         
         // messageData.chatRoomID is either Auuid_Buuid or sessionID
         // targetChatRoom is the uuid of the DM recipient or the sessionID
-        const { targetChatRoom, isDM } = getChatRoomData(cleanChatRoomID, senderUUID);
+        const { targetChatRoom, isDM } = getChatRoomData(cleanChatRoomID, userUUID);
+        if(!targetChatRoom) throw new Error("targetChatRoom unable to be retrived.");
 
         // reconstruct package, don't just send 'outboundData', only emit what's necessary
         const formattedMessage = formatInboundMessage(
-            sender, 
+            user, 
             cleanChatRoomID, 
             cleanContext,
-            msgID
+            cleanMsgID
         );
 
         // send message to everyone but sender
         socket.to(targetChatRoom).emit('receive-message', formattedMessage);
         cb({ 
             success: true, 
-            msgID,
+            cleanMsgID,
             serverTimestamp: formattedMessage.serverTimestamp 
         });
 
-        console.log(`[${isDM ? `DM` : `CHAT`}] ${sender.name} -> ${targetChatRoom}: ${cleanContext.text}`);
+        console.log(`[${isDM ? `DM` : `CHAT`}] ${user.name} -> ${targetChatRoom}: ${cleanContext.text}`);
         // console.log("data being sent to receive-message: ", outboundData);
     }));
 
-    socket.on('edit-message', handleEvent(async (data, cb) => {
-        const senderUUID = socketToUUID[socket.id];
-        const sender = activeUsers[senderUUID];
-        const { msgID, chatRoomID, newText } = data;
-        
+    socket.on('edit-message', handleEvent(socket, ['msgID', 'chatRoomID', 'newText'], async ({ msgID, chatRoomID, newText }, cb) => {
+        // obtain and clean necessary data
+        const { userUUID } = socket;
         const cleanChatRoomID = clean.chatRoom(chatRoomID);
-        const cleanText = clean.message(newText);
+        const cleanMsgID = clean.msgID(msgID);
+        const cleanText = clean.messageText(newText);
 
-        if (!sender || !cleanChatRoomID) {
-            throw new Error("Session expired or room doesn't exist.");
-        }
-        if(!msgID || !cleanText ) {
-            return cb({ success: false, error: "Message is empty or doesn't exist." });
-        }
+        // system guards
+        checkCleanData(`EDIT MSG`, { cleanChatRoomID, cleanMsgID, cleanText });
         
-        const { targetChatRoom } = getChatRoomData(cleanChatRoomID, senderUUID);
+        const { targetChatRoom } = getChatRoomData(cleanChatRoomID, userUUID);
+        if(!targetChatRoom) throw new Error("targetChatRoom unable to be retrived.");
 
         socket.to(targetChatRoom).emit('message-edited', {
             chatRoomID: cleanChatRoomID,
-            msgID,
-            cleanText
+            msgID: cleanMsgID,
+            newText: cleanText
         });
 
         cb({ success: true });
-        console.log(`[EDIT] Chat room ${chatRoomID} | Message ${msgID} edited to: ${cleanText}`);
+        console.log(`[EDIT] Chat room ${cleanChatRoomID} | Message ${cleanMsgID} edited to: ${cleanText}`);
     }));
 
-    socket.on('delete-message', handleEvent(async (data, cb) => {
-        const senderUUID = socketToUUID[socket.id];
-        const sender = activeUsers[senderUUID];
-        const { msgID, chatRoomID } = data;
+    socket.on('delete-message', handleEvent(socket, ['msgID', 'chatRoomID'], async ({ msgID, chatRoomID }, cb) => {
+        // obtain and clean necessary data
+        const { user, userUUID } = socket;
         const cleanChatRoomID = clean.chatRoom(chatRoomID);
+        const cleanMsgID = clean.msgID(msgID);
 
+        // system guards
+        checkCleanData(`DLT MSG`, { cleanChatRoomID, cleanMsgID });
 
-        if(!sender || !cleanChatRoomID ) {
-            throw new Error("Delete failed: session expired.");
-        }
-        if (!msgID ) {
-            return cb({ success: false, error: "Delete failed: missing msgID."});
-        }
-        
-        const { targetChatRoom } = getChatRoomData(cleanChatRoomID, senderUUID);
+        const { targetChatRoom } = getChatRoomData(cleanChatRoomID, userUUID);
+        if(!targetChatRoom) throw new Error("targetChatRoom unable to be retrieved.");
 
         socket.to(targetChatRoom).emit('message-deleted', {
             chatRoomID: cleanChatRoomID,
-            msgID,
-            senderName: sender.name,
+            msgID: cleanMsgID,
+            senderName: user.name,
         });
 
         cb({ success: true });
-        console.log(`[DELETE] Chat room ${chatRoomID} | Message ${msgID} deleted by ${sender.name}`);
+        console.log(`[DELETE] Chat room ${cleanChatRoomID} | Message ${cleanMsgID} deleted by ${user.name}`);
     }));
 
-    socket.on('typing', ({ chatRoomID }) => {
-        const senderUUID = socketToUUID[socket.id];
-        const sender = activeUsers[senderUUID];
+    socket.on('typing', handleEvent(socket, ['chatRoomID'], async ({ chatRoomID }, cb) => {
+        // obtain and clean necessary data
+        const { user, userUUID } = socket;
         const cleanChatRoomID = clean.chatRoom(chatRoomID);
-        if (!sender || !cleanChatRoomID ) return;
+
+        // system guards
+        checkCleanData(`TYPING`, { cleanChatRoomID });
  
-        const { targetChatRoom } = getChatRoomData(cleanChatRoomID, senderUUID);
+        const { targetChatRoom } = getChatRoomData(cleanChatRoomID, userUUID);
+        if (!targetChatRoom) return;
 
         // data.chatRoomID is either sessionID or DMRoomID
         socket.to(targetChatRoom).emit('user-typing', {
             chatRoomID: cleanChatRoomID,
-            senderUUID, 
-            senderName: sender.name
+            userUUID, 
+            senderName: user.name
         }); 
-    });
+    }));
 
-    socket.on('stop-typing', ({ chatRoomID }) => {
-        const senderUUID = socketToUUID[socket.id];
+    socket.on('stop-typing', handleEvent(socket, ['chatRoomID'], async ({ chatRoomID }, cb) => {
+        // obtain and clean necessary data
+        const { user, userUUID } = socket;
         const cleanChatRoomID = clean.chatRoom(chatRoomID);
-        if (!senderUUID || !cleanChatRoomID ) return;
+
+        // system guards
+        checkCleanData(`STOP TYPING`, { cleanChatRoomID });
  
-        const { targetChatRoom } = getChatRoomData(cleanChatRoomID, senderUUID);
+        const { targetChatRoom } = getChatRoomData(cleanChatRoomID, userUUID);
+        if(!targetChatRoom) return;
 
         socket.to(targetChatRoom).emit('user-stop-typing', {
-            senderUUID
+            userUUID
         });
-    });
+    }));
 
 });
 

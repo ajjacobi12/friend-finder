@@ -137,6 +137,11 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID) => {
                 console.log(`User ${user.name} is assigned as host for session ${sessionID}`);
                 io.to(sessionID).emit('host-change', userUUID);
             }
+
+            // THE MANUAL STAMP (for middleware)
+            socket.user = user;
+            socket.userUUID = user.uuid;
+            socket.sessionID = cleanSessionID;
             
             return user;
         },
