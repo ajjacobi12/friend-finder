@@ -63,7 +63,12 @@ export const joinSessionAction = (sessionID, existingUUID) => {
 
 // ------- PROFILE FUNCTIONS --------
 export const updateUserAction = (name, color) => {
-    return secureEmit('update-user', { name, color });
+    return secureEmit('update-user', {
+        profile: {
+            name, 
+            color
+        } 
+    });
 };
 
 // ------  CHAT FUNCTIONS --------

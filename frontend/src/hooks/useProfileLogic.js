@@ -6,6 +6,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useUser } from '../context/UserContext';
 import { leaveSessionAction, updateUserAction } from '../services/socketServices';
 import { useSessionBackHandler } from './useSessionBackHandler';
+import { validate, desanitize } from '../services/validation';
 
 export const useProfileLogic = ({ navigation, colorOptions }) => {
     const { 
@@ -22,9 +23,16 @@ export const useProfileLogic = ({ navigation, colorOptions }) => {
     // --- INITIAL JOIN ----
     const handleJoin = async () => {
         if (loading) return;
-        // make sure user has input a name
-        if (!tempName || tempName.trim() === "") {
-            setErrorMsg("Please enter a username!");
+
+        // validate the input
+        const result = validate(UserProfileSchema, {
+            name: tempName,
+            color: selectedColor
+        });
+
+        // if input is invalid, return reason why
+        if (!result.success){
+            setErrorMsg(result.error);
             return;
         }
 
@@ -32,7 +40,7 @@ export const useProfileLogic = ({ navigation, colorOptions }) => {
         setLoading(true);
 
         try {
-            await updateUserAction(tempName.trim(), selectedColor);
+            await updateUserAction(result.data.name, result.data.color);
 
             setName(tempName.trim());
             setHasRegistered(true);

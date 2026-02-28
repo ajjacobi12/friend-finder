@@ -5,7 +5,7 @@ import React, { useState, createContext, useContext, useEffect, useCallback, use
 import { Alert, TouchableOpacity, View, Text, Animated, PanResponder, ActivityIndicator } from 'react-native';
 import { useAudioPlayer } from 'expo-audio';
 
-import socket from '../services/socketServices';
+import socket from '../api/socket';
 import { navigationRef } from '../services/navigationService';
 import { styles } from '../styles/styles';
 
@@ -41,14 +41,17 @@ export const UserProvider = ({ children }) => {
 
     const sessionIDRef = useRef(sessionID);
     const isHostRef = useRef(isHost);
+    const userUUIDRef = useRef(userUUID);
 
     const audioSource = require('../../assets/ding.mp3');
     const player = useAudioPlayer(audioSource);
 
-    // keep a ref to the latest sessionID for cleanup on disconnect
+    // using a ref removes the useEffect dependency on userUUID so it doesn't run 
+    // (remove and re-attach every single socket listener) every time a user joins, userUUID, etc. changes
     useEffect(() => { sessionIDRef.current = sessionID; }, [sessionID]);
     useEffect(() => { isHostRef.current = isHost; }, [isHost]);
     useEffect(() => { activeRoomRef.current = currentActiveRoom; }, [currentActiveRoom]);
+    useEffect(() => { userUUIDRef.current = userUUID; }, [userUUID]);
 
     // --- CLEANUP FUNCTION ----
     const handleCleanExit = useCallback(() => {
@@ -64,6 +67,9 @@ export const UserProvider = ({ children }) => {
         setIsHost(false);
         setHasRegistered(false);
         setIsReconnecting(false);
+
+        // remove socket "identity badges"
+        socket.auth = { userUUID: null, sessionID: null };
     }, []);
 
     // --- SHOW NOTIFICATION FUNCTION ---
@@ -223,7 +229,7 @@ export const UserProvider = ({ children }) => {
             if (newUsers.length > oldUsers.length && oldUsers.length !== 0) {
                 const joinedUser = newUsers.find(u => !oldUsers.some(p => p.uuid === u.uuid));
                 // notify only if joined user is not self
-                if (joinedUser && joinedUser.uuid !== userUUID) {
+                if (joinedUser && joinedUser.uuid !== userUUIDRef.current) {
                     playJoinSound();
                     showNotification({ 
                         title: `👤 ${joinedUser.name} `, 
@@ -250,6 +256,9 @@ export const UserProvider = ({ children }) => {
 
         // --- HANDLERS ---
         const onConnect = async () => {
+            // ensures that if socket drops, the next reconnection attempt sends the "ID badge" automatically
+            socket.auth = { userUUID: userUUIDRef.current, sessionID: sessionIDRef.current };
+
             console.log("Connected", socket.id);
             setIsConnected(true);
             isConnectingRef.current = false;
@@ -262,10 +271,10 @@ export const UserProvider = ({ children }) => {
             }
 
             // silent rejoin logic
-            if (sessionIDRef.current && userUUID) {
-                console.log("[SILENT REJOIN] attempt for user ", userUUID);
+            if (sessionIDRef.current && userUUIDRef.current) {
+                console.log("[SILENT REJOIN] attempt for user ", userUUIDRef.current);
                 try {
-                    const response = await joinSessionAction(sessionIDRef.current, userUUID);
+                    const response = await joinSessionAction(sessionIDRef.current, userUUIDRef.current);
                     if (response.alreadyRegistered) {
                         setName(desanitize(response.name));
                         setSelectedColor(response.color);
@@ -324,7 +333,7 @@ export const UserProvider = ({ children }) => {
                 return cleanUsers;
             });
 
-            const otherUsers = cleanUsers.filter(u => u.uuid !== userUUID);
+            const otherUsers = cleanUsers.filter(u => u.uuid !== userUUIDRef.current);
             setFriends(otherUsers);
         };
 
@@ -336,6 +345,7 @@ export const UserProvider = ({ children }) => {
             setAllMessages(prev => {
                 const roomMsgs = prev[chatRoomID] || [];
                 const existingMsgIndex = roomMsgs.findIndex(m => m.msgID === msgID);
+
                 if (existingMsgIndex !== -1) {
                     // check if we already have a "local" version of this message
                     // theoretically this should never happen where we recieve a message we sent, but who knows
@@ -407,7 +417,7 @@ export const UserProvider = ({ children }) => {
         };
 
         const onHostChange = (newHostUUID) => {
-            const amIHost = userUUID === newHostUUID;
+            const amIHost = userUUIDRef.current === newHostUUID;
             
             if (amIHost && !justCreatedSession.current && !isHostRef.current) {
                 showNotification({ 
@@ -444,7 +454,7 @@ export const UserProvider = ({ children }) => {
             socket.off('removed-from-session', onRemoved);
             socket.off('host-change', onHostChange);
         };
-    }, [socket, userUUID, showNotification, handleCleanExit]); 
+    }, [socket, showNotification, handleCleanExit]); 
 
     const value = useMemo(() => ({
         name, setName, selectedColor, setSelectedColor, hasRegistered, 

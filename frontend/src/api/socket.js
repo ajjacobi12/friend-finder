@@ -20,9 +20,14 @@ const socket = io(SERVER_URL, {
     reconnection: true, // allows internal library to reconnect automatically
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000, // try to reconnect every 1 second
-    reconnectionDelayMax: 3000, // never wait more than 5 seconds between tries
+    reconnectionDelayMax: 3000, // never wait more than 3 seconds between tries
     randomizationFactor: 0.5,
     timeout: 20000, // 20 seconds before giving up
+    autoConnect: true, // connect initially as guest
+    auth: {
+        userUUID: null,
+        sessionID: null
+    }
 }); 
 // by default, socket.io tries HTTP Long Polling first (like sending a bunch of letters),
 // want to force to 'websocket' from start (it's like a live phone call) since it's faster

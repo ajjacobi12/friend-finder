@@ -1,5 +1,6 @@
 // dataCleaner.js
 // ensures data is correct type and format
+
 const { z } = require('zod');
 const DOMPurify = require('isomorphic-dompurify');
 
@@ -43,11 +44,11 @@ const ChatRoomIDSchema = z.union([SessionIDSchema, DMPattern]);
 const msgIDSchema = z.string().uuid();
 
 // Chat Messages: no empty strings, max 500 characters
-const MessageTextSchema = z.string().min(1).max(500).transform(sanitizeStrict);
+const msgTextSchema = z.string().min(1).max(500).transform(sanitizeStrict);
 
 // message context: contains text; isEncrypted is boolean, default = false; version default = "1.0"
-const MessageContextSchema = z.object({
-    text: MessageTextSchema,
+const msgContextSchema = z.object({
+    text: msgTextSchema,
     isEncrypted: z.boolean().default(false),
     version: z.string().regex(/^[0-9.]+$/).default("1.0")
 });
@@ -81,13 +82,13 @@ const clean = {
         return result.success ? result.data : null;
     },
 
-    messageText: (msg) => {
-        const result = MessageTextSchema.safeParse(msg);
+    msgText: (msg) => {
+        const result = msgTextSchema.safeParse(msg);
         return result.success ? result.data : null;
     },
 
-    messageContext: (msgContext) => {
-        const result = MessageContextSchema.safeParse(msgContext);
+    msgContext: (msgContext) => {
+        const result = msgContextSchema.safeParse(msgContext);
         return result.success ? result.data : null;
     },
 };

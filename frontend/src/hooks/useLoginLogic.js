@@ -6,6 +6,7 @@ import { Alert } from 'react-native';
 import { useUser } from '../context/UserContext';
 import { useSessionBackHandler } from './useSessionBackHandler';
 import { createSessionAction, joinSessionAction } from '../services/socketServices';
+import { socket } from '../api/socket';
     
 export const useLoginLogic = ({ navigation, isJoinScreen, hideJoinInput }) => {    
 
@@ -42,13 +43,20 @@ export const useLoginLogic = ({ navigation, isJoinScreen, hideJoinInput }) => {
 
     // handles a successful create/join
     const handleSuccess = (response) => {
-        // sync all context state with response
+        // sync all context states with response
         setUserUUID(response.userUUID);
         setSessionID(response.sessionID); 
         setIsHost(response.isHost || false);
         setSessionUsers(response.currentUsers || []);
         setName(response.name);
         setSelectedColor(response.color);
+
+        // stamp socket for reconnections
+        // updates credentials the socket uses for the handshake
+        socket.auth = {
+            userUUID: response.userUUID,
+            sessionID: response.sessionID
+        };
 
         // registration check
         if (response.alreadyRegistered) {
