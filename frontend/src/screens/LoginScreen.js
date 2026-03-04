@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { styles } from '../styles/styles';
 import { useLoginLogic } from '../hooks/useLoginLogic';
+import { useUser } from '../context/UserContext';
 
 const { width } = Dimensions.get('window');
 
@@ -17,6 +18,7 @@ export default function LoginScreen( { navigation }) {
         errorMsg, setErrorMsg,
         loading, createNewSession, joinSession
     } = useLoginLogic({ navigation, isJoinScreen, hideJoinInput });
+    const { handleCleanExit } = useUser();
         
     const insets = useSafeAreaInsets();
     const slideAnim = useRef(new Animated.Value(0)).current;
@@ -78,6 +80,15 @@ export default function LoginScreen( { navigation }) {
         }).start();
     };
 
+    const fullWipe = async () => {
+        await handleCleanExit(true);
+        console.log("full handleCleanExit performed");
+        const savedIdentity = await storageService.loadIdentity();
+        const savedPrefs = await storageService.loadPrefs();
+        console.log("Saved identity: ", savedIdentity);
+        console.log("Saved prefs: ", savedPrefs);     
+    };
+
     const isJoinDisabled = tempCode.trim().length === 0 || loading;
 
     // if (!isConnected) {
@@ -109,9 +120,26 @@ export default function LoginScreen( { navigation }) {
 
                 {/* ---- SCREEN 1: MAIN MENU (LEFT) ----- */}
                 <View style={{ width: width, alignItems: 'center', justifyContent: 'center',paddingHorizontal: 20 }}>
+                    <Pressable
+                        style={({ pressed }) => [
+                            styles.button,
+                            pressed && [
+                                { transform: [{ scale: 0.96 }], backgroundColor: '#005ecb' }
+                            ]
+                        ]}
+                        onPress={fullWipe}
+                    >
+                        <Text>Reset Session</Text>
+                    </Pressable>
                     {/* new session button */}
                     <Pressable 
-                        style={[styles.button, { width: '100%', height: 100, justifyContent: 'center', paddingHorizontal: 25}]} 
+                        style={({ pressed }) => [
+                            styles.button, 
+                            { width: '100%', height: 100, paddingHorizontal: 25 },
+                            pressed && [
+                                { transform: [{ scale: 0.96 }], backgroundColor: '#005ecb' }
+                            ]
+                        ]} 
                         onPress={createNewSession}
                         disabled={loading}
                     >
@@ -124,7 +152,13 @@ export default function LoginScreen( { navigation }) {
 
                     {/* join session button */}
                     <Pressable 
-                        style={[styles.button, { backgroundColor: '#77e1ede4', marginTop: 0, width: '100%', height: 100, justifyContent: 'center'}]} 
+                        style={({ pressed }) => [
+                            styles.button, 
+                            { backgroundColor: '#77e1ede4', marginTop: 0, width: '100%', height: 100 },
+                            pressed && [
+                                { transform: [{ scale: 0.96 }], backgroundColor: '#5bcbd8e4' }
+                            ]
+                        ]} 
                         onPress={showJoinInput}
                         disabled={loading}
                     >
@@ -136,7 +170,7 @@ export default function LoginScreen( { navigation }) {
                 <View style={{ width: width, flex: 1, alignItems: 'center' }}>
 
                     {/* START HEADER */}
-                    <View style={[styles.customHeader, { height: 60 + insets.top, paddingTop: insets.top, width: width }]}>
+                    <View style={[styles.customHeader, { height: 50 + insets.top, paddingTop: insets.top, width: width }]}>
 
                         {/* LEFT SLOT */}
                         <View style={{ flex: 1, alignItems: 'flex-start', justifyContent: 'center' }}>
@@ -194,16 +228,20 @@ export default function LoginScreen( { navigation }) {
 
                         {/* submit button */}
                         <Pressable 
-                            style={[styles.button, {
+                            style={({ pressed }) => [
+                                styles.button, {
                                 backgroundColor: '#28a745',
                                 marginTop: 20,
                                 width: '50%',
                                 height: 80,
-                                justifyContent: 'center',
                                 opacity: isJoinDisabled ? 0.6 : 1,
                                 paddingHorizontal: 20,
                                 paddingVertical: 0
-                            }]} 
+                                },
+                                pressed && [
+                                    { transform: [{ scale: 0.96 }], backgroundColor: '#218838' }
+                                ]
+                            ]} 
                             disabled={isJoinDisabled}
                             onPress={joinSession}
                         >

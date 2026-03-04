@@ -29,7 +29,7 @@ export default function ProfileScreen({ navigation }) {
             <StatusBar barStyle="dark-content" />
 
             {/* start of header */}
-            <View style={[styles.customHeader, { height: 60 + insets.top, paddingTop: insets.top }]}>
+            <View style={[styles.customHeader, { height: insets.top, paddingTop: 50 + insets.top }]}>
 
                 {/* LEFT SLOT */}
                 <View style={{ flex: 1, alignItems: 'flex-start', justifyContent: 'center' }}>
@@ -92,11 +92,14 @@ export default function ProfileScreen({ navigation }) {
                     {/* enter lobby button */}
                     {(sessionID && !hasRegistered) ? (
                         <Pressable 
-                            style={styles.button} 
+                            style={({ pressed }) => [
+                                styles.button,
+                                pressed && { transform: [{ scale: 0.96 }], backgroundColor: '#005ecb' }
+                            ]} 
                             onPress={handleJoin} 
                             disabled={loading}
                         >
-                            <Text style={[styles.buttonText, { fontSize: 25}]}>{loading ? "Entering..." : "Enter Lobby"}</Text>
+                            <Text style={[styles.buttonText, { fontSize: 25 }]}>{loading ? "Entering..." : "Enter Lobby"}</Text>
                         </Pressable>
                     ) : null}
 

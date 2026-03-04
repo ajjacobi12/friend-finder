@@ -15,7 +15,7 @@ export default function MapScreen({ navigation }) {
 
     return (
         <View style={styles.container}>
-            <View style={[styles.customHeader, { height: 60 + insets.top, paddingTop: insets.top }]}>
+            <View style={[styles.customHeader, { height: insets.top, paddingTop: 50 + insets.top }]}>
                 <View/>
                 <View style={styles.absoluteHeaderTitle}>
                     <Text style={{ fontFamily: 'Courier', fontSize: 30, fontWeight: 'bold', marginTop: 0 }}>🗺️ Map</Text>

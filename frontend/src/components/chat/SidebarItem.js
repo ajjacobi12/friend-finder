@@ -42,23 +42,32 @@ const SidebarItem = React.memo(({ item, isUnread, onChatPress }) => {
     );
 });
 
-export default function Sidebar({ isVisible, setIsSidebarVisible, navigation }) {
+export default function Sidebar({ isVisible, setIsSidebarVisible, navigation, isDirectMessage, currentChatRoomID }) {
     const { friends, unreadRooms, userUUID } = useUser();
 
     // --- OPEN DM ---
     const startPrivateChat = useCallback((targetUser) => {
-        setIsSidebarVisible(false);
-
         // create unique room id for both people
         const DMroomID = getChatRoomID(userUUID, targetUser.uuid);
 
-        // define the navigation parameters
-        navigation.navigate('Chat', {
-            isDirectMessage: true,
-            DMroomID,
-            recipientName: targetUser.name,
+        if (isDirectMessage && currentChatRoomID == DMroomID) {
+            setIsSidebarVisible(false);
+            return;
+        }
+
+        setIsSidebarVisible(false);
+
+        // wrap navigation in delay using requestAnimationFrame
+        // ensures the modal "out"animaiontstarts before the screen tries to process navigation
+        requestAnimationFrame(() => {
+            // define the navigation parameters
+            navigation.navigate('Chat', {
+                isDirectMessage: true,
+                DMroomID,
+                recipientName: targetUser.name,
+            });
         });
-    }, [userUUID, navigation, setIsSidebarVisible]);
+    }, [userUUID, navigation, setIsSidebarVisible, isDirectMessage, currentChatRoomID]);
     
     const renderUser = useCallback(( { item }) => {
         const itemDMRoomID = getChatRoomID(userUUID, item.uuid);

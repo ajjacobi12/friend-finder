@@ -1,22 +1,22 @@
-// useLoginLogic.js    
+// frontend/src/hooks/useLoginLogic.js    
 
 import React, { useState, useCallback, useRef } from 'react';
 import { Alert } from 'react-native';
 
 import { useUser } from '../context/UserContext';
+import { storageService } from '../services/storageService';
 import { useSessionBackHandler } from './useSessionBackHandler';
 import { createSessionAction, joinSessionAction } from '../services/socketServices';
-import { socket } from '../api/socket';
+import socket from '../api/socket';
     
 export const useLoginLogic = ({ navigation, isJoinScreen, hideJoinInput }) => {    
 
     const { setSessionID, setSessionUsers, setName, setSelectedColor, 
         setHasRegistered, isConnected, setIsHost, justCreatedSession, 
-        userUUID, setUserUUID } = useUser();
+        setUserUUID, isLoading, setIsLoading } = useUser();
 
     const [tempCode, setTempCode] = useState(''); 
     const [errorMsg, setErrorMsg]  = useState('');
-    const [loading, setLoading] = useState(false);
 
     const activeRequest = useRef(null);
 
@@ -31,54 +31,85 @@ export const useLoginLogic = ({ navigation, isJoinScreen, hideJoinInput }) => {
             );
             return false;
         }
-        if(loading) return false;
+
+        console.log("loading:", isLoading);
+        if (isLoading) return false;
 
         // sets initial states
         setErrorMsg("");
-        setLoading(true);
+        setIsLoading(true);
         activeRequest.current = type;
         justCreatedSession.current = isNewSession;
         return true;
     };
 
     // handles a successful create/join
-    const handleSuccess = (response) => {
+    const handleSuccess = async (response) => {
+
+        // console.log("!!! HANDLE SUCCESS STARTED !!!");
+        try {
         // sync all context states with response
-        setUserUUID(response.userUUID);
-        setSessionID(response.sessionID); 
-        setIsHost(response.isHost || false);
-        setSessionUsers(response.currentUsers || []);
-        setName(response.name);
-        setSelectedColor(response.color);
+            setUserUUID(response.userUUID);
+            setSessionID(response.sessionID); 
+            setIsHost(response.isHost || false);
+            setSessionUsers(response.currentUsers || []);
 
-        // stamp socket for reconnections
-        // updates credentials the socket uses for the handshake
-        socket.auth = {
-            userUUID: response.userUUID,
-            sessionID: response.sessionID
-        };
+            await storageService.saveIdentity({
+                userUUID: response.userUUID,
+                sessionID: response.sessionID,
+            });
 
-        // registration check
-        if (response.alreadyRegistered) {
-            setHasRegistered(true);
-        } else {
-            navigation.navigate('Profile');
+            // stamp socket for reconnections
+            // updates credentials the socket uses for the handshake
+            socket.auth = {
+                userUUID: response.userUUID,
+                sessionID: response.sessionID
+            };
+
+            // console.log("Navigation check - alreadyRegistered:", response.alreadyRegistered);
+            if (response.alreadyRegistered) {
+                setHasRegistered(true);
+                setName(response.name);
+                setSelectedColor(response.color);
+
+                await storageService.savePrefs({
+                    name: response.name,
+                    color: response.color
+                });
+
+            } else {
+                // console.log("Attempting to navigate to Profile...");
+                navigation.navigate('Profile');
+            }
+        } catch (err) {
+            console.error("CRASH INSIDE HANDLE SUCCESS:", err);
         }
+  
     };
 
     // handles final cleanup
     const cleanup = () => {
         activeRequest.current = null;
-        setLoading(false);
+        setIsLoading(false);
     };
 
     // ------ START NEW SESSION --------
     const createNewSession = async () => {
+        console.log("starting create request");
         if (!startRequest('creating', true)) return;
 
+        const savedIdentity = storageService.loadIdentity();
+        const uuid = savedIdentity?.userUUID ? savedIdentity.userUUID : null;
+        const savedPrefs = storageService.loadPrefs();
+        const profile = (savedPrefs?.name) ? { name: savedPrefs?.name, color: savedPrefs?.color } : null;
+
+        // console.log("Saved Identity userUUID: ", savedIdentity?.userUUID, "profile to send: ", profile);
+
         try {
-            const response = await createSessionAction(userUUID);
+            // console.log("Attempting to create session");
+            const response = await createSessionAction(uuid, profile);
             // check if android user hit back while server was processing
+            // console.log("Active request status: ", activeRequest.current);
             if (activeRequest.current !== 'creating') return;
             handleSuccess(response);
         } catch (err) {
@@ -99,8 +130,14 @@ export const useLoginLogic = ({ navigation, isJoinScreen, hideJoinInput }) => {
         if (!startRequest('joining', false)) return;
         
         const sessionID = tempCode.toUpperCase();
+
+        const savedIdentity = storageService.loadIdentity();
+        const uuid = savedIdentity?.userUUID ? savedIdentity.userUUID : null;
+        const savedPrefs = storageService.loadPrefs();
+        const profile = (savedPrefs?.name) ? { name: savedPrefs?.name, color: savedPrefs?.color } : null;
+
         try {
-            const response = await joinSessionAction(sessionID, userUUID);
+            const response = await joinSessionAction(sessionID, uuid, profile);
             // check if android user hits back while server was processing
             if (activeRequest.current !== 'joining') return;
             handleSuccess(response);
@@ -116,7 +153,7 @@ export const useLoginLogic = ({ navigation, isJoinScreen, hideJoinInput }) => {
     // take care of android "back" button
     const onLeaveLogin = useCallback(() => {
         activeRequest.current = null;
-        setLoading(false);
+        setIsLoading(false);
      
         // if on screen 2 (join session)
         if (isJoinScreen) {
@@ -125,14 +162,14 @@ export const useLoginLogic = ({ navigation, isJoinScreen, hideJoinInput }) => {
 
         // don't let android do anything else
         return true;
-    }, [isJoinScreen, hideJoinInput, setLoading]);
+    }, [isJoinScreen, hideJoinInput, setIsLoading]);
     useSessionBackHandler(onLeaveLogin);
 
     return {
         createNewSession, joinSession,
         tempCode, setTempCode,
         errorMsg, setErrorMsg,
-        loading
+        isLoading
     };
 
 }

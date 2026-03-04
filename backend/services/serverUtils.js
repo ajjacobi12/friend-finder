@@ -1,6 +1,23 @@
-// serverUtils.js
-const clean = require('./services/dataCleaner');
+// backend/services/serverUtils.js
+const clean = require('./dataCleaner');
 
+// -------------------------------------- CHAT HELPERS --------------------------------------
+// helper to get target chat room for start/stopping typing
+const getChatRoomData = (chatRoomID, senderUUID) => {
+    if (!chatRoomID || typeof chatRoomID !== 'string') return { targetChatRoom: null, isDM: false };
+
+    const isDM = chatRoomID.includes('_');
+    const targetChatRoom = isDM 
+    ? chatRoomID.split('_').find(uuid => uuid !== senderUUID)
+    : chatRoomID;
+
+    // Safety check: if it's a DM but we couldn't find the 'other' UUID
+    if (!targetChatRoom) return { targetChatRoom: null, isDM };
+
+    return { targetChatRoom, isDM };
+};
+
+// -------------------------------------- DATA CLEANING HELPERS --------------------------------------
 const CLEANING_MAP = {
     existingUUID: (val) => clean.userUUID(val),
     userUUIDToRemove: (val) => clean.userUUID(val),
@@ -9,21 +26,13 @@ const CLEANING_MAP = {
     sessionID: (val) => clean.sessionID(val),
 
     profile: (val) => clean.userProfile(val),
+    existingProfile: (val) => clean.userProfile(val),
 
     msgID: (val) => clean.msgID(val),
     chatRoomID: (val) => clean.chatRoom(val),
 
     context: (val) => clean.msgContext(val),
     newText: (val) => clean.msgText(val),
-};
-
-// helper to get target chat room for start/stopping typing
-const getChatRoomData = (chatRoomID, senderUUID) => {
-    const isDM = chatRoomID.includes('_');
-    const targetChatRoom = isDM 
-    ? chatRoomID.split('_').find(uuid => uuid !== senderUUID)
-    : chatRoomID;
-    return { targetChatRoom, isDM };
 };
 
 // helper to check cleaned data
@@ -38,6 +47,7 @@ const checkCleanData = (listenerName, dataMap)=> {
     }
 };
 
+// -------------------------------------- GENERAL LISTENER HELPERS --------------------------------------
 // helper for callbacks
 // --> checks for existence of verified socket properties, throws new error if they don't exist
 // --> checks for existence of given arguments
@@ -45,7 +55,7 @@ const checkCleanData = (listenerName, dataMap)=> {
 // --> validates cleaned arguments
 
 // calls the listener/logic
-const handleEvent = (eventName, socket, requiredFields, logic) => {
+const handleEvent = (eventName, socket, requiredFields, logic, isAuthRequired = true) => {
     return async (data, callback) => {
         // Automatically creates the safeCallback for you
         const cb = typeof callback === 'function' ? callback : () => {};
@@ -53,34 +63,44 @@ const handleEvent = (eventName, socket, requiredFields, logic) => {
         try {
             // skip this for 'create-session' and 'join-session' since users aren't verified yet
             // skip for 'leave-session' since !user should return success: true
-            const isPublic = requiredFields.includes('isPublic');
+            if (isAuthRequired) 
+            {
+                // authorization checks
+                if (!socket.user) throw new Error("Authentication failed: no verified user.");
+                if (!socket.sessionID) throw new Error("Authentication failed: no verified sessionID");
 
-            // authorization checks
-            if (!socket.user && !isPublic) throw new Error("Authentication failed: no verified user.");
-            if (!socket.sessionID && !isPublic) throw new Error("Authentication failed: no verified sessionID");
-
-            // check that an argument exists when required
-            if (!isPublic && (!data || typeof data !== 'object')) {
-                throw new Error(`[${eventName}] Protocol error: Invalid or missing data object.`);
+                // check that an argument exists when required
+                if (!data || typeof data !== 'object') {
+                    throw new Error(`[${eventName}] Protocol error: Invalid or missing data object.`);
+                }
             }
 
             // validate given individual arguments, then clean
             const cleanedData = {};            
             for (const field of requiredFields) {
-                // skip internal "isPublic" flag
-                if (field === 'isPublic') continue;
-
                 // checks for existence of individual arguments
-                const rawValue = data?.[field];
-                if (rawValue === undefined || rawValue === null) {
-                    throw new Error(`Protocol error: missing field [${field}].`);
+                const isRequired = !field.startsWith('?');
+                const fieldName = isRequired ? field : field.substring(1);
+
+                const rawValue = data?.[fieldName];
+
+                if (isRequired && (rawValue === undefined || rawValue === null)) {
+                    throw new Error(`Protocol error: missing field [${fieldName}].`);
+                }
+                if (!isRequired && (rawValue !== null && !rawValue)) {
+                    throw new Error(`Protocol error: missing field [${fieldName}].`);    
                 }
 
-                // cleans arguments (based on above map!!!!), adds it array cleanedData
-                if (CLEANING_MAP[field]) {
-                    cleanedData[field] = CLEANING_MAP[field](rawValue);
-                } else {
-                    cleanedData[field] = rawValue;
+                // console.log("Field name: ", fieldName, ", Value: ", rawValue);
+
+                // if value exists, clean and store it
+                if (rawValue !== undefined && rawValue !== null) {
+                    // cleans arguments (based on above map!!!!), adds it array cleanedData
+                    if (CLEANING_MAP[fieldName]) {
+                        cleanedData[fieldName] = CLEANING_MAP[fieldName](rawValue);
+                    } else {
+                        cleanedData[fieldName] = rawValue;
+                    }
                 }
             }
 
@@ -92,14 +112,25 @@ const handleEvent = (eventName, socket, requiredFields, logic) => {
                 user: socket.user, 
                 userUUID: socket.userUUID, 
                 sessionID: socket.sessionID,
-                socket: socket
+                socket
             };
 
-            // if it makes it past the verifiication and existence checks, run the listener logic
+            // if it makes it past the verification and existence checks, run the listener logic
             await logic(cleanedData, userContext, cb);
         } catch (err) {
-            console.error("SECURE EVENT ERROR: ", err.message);
-            if (cb) cb({ success: false, error: err.message || "Internal Server Error" });
+            // Check if it's a "Protocol Error" (User's fault) or "Server Error" (Your fault)
+            const isProtocolError = err.message.includes("Protocol") || err.message.includes("Authentication");
+            
+            if (isProtocolError) {
+                console.warn(`[PROTOCOL VIOLATION] ${eventName}: ${err.message}`);
+            } else {
+                console.error(`[SERVER ERROR] ${eventName}:`, err.stack);
+            }
+
+            if (cb) cb({ 
+                success: false, 
+                error: isProtocolError ? err.message : "An internal server error occurred." 
+            });
         }
     };
 };

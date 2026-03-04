@@ -1,4 +1,6 @@
-// 1. import the "engines"
+// backend/server.js
+
+// import the "engines"
 const express = require('express'); // pulls blueprints for express framework
 const { send } = require('process');
 const { text } = require('stream/consumers');
@@ -9,11 +11,11 @@ const io = require('socket.io')(http, {
         origin: "*", // this allows phone to talk to computer
         methods: ["GET", "POST"]
     },
-    pingTimeout: 2000, // wait 2 seconds before declaring "dead"
+    pingTimeout: 10000, // wait 10 seconds before declaring "dead"
     pingInterval: 5000 // send a ping every 5 seconds
 }); // imports socket.io (tool for real-time, two-way communication), and attaches it to "http" server
 
-// 2. set up the "static folder"
+// set up the "static folder"
 app.use(express.static('public')); // tells Express, "if anyoneasks for a file (eg. image, CSS file, or html page), look inside a folder named public". This is howto "serve" the frontend code to the user's browser
 
 // object to store users { "socketID", name: ...,  color: ..., isHost: ...}
@@ -22,37 +24,24 @@ const socketToUUID = {}; // key: socketID, value: UUID (for quick lookup)
 const activeSessions = {}; // tracks active session IDs
 const maxSessionCapacity = 12;
 
-const sessionService = require('./services/sessionService')(io, activeUsers, activeSessions, socketToUUID)
 const clean = require('./services/dataCleaner');
 const { handleEvent } = require('./services/serverUtils');
 
-const chat = require('./handlers/chatHandlers');
-
-const login = require('./handlers/loginHandlers')(
-    activeUsers,
-    activeSessions,
-    sessionService,
+// when requiring a folder it automatically looks for a file called index.js
+const sessionService = require('./services/session')(
+    io, 
+    activeUsers, 
+    activeSessions, 
+    socketToUUID,
     maxSessionCapacity
 );
 
-const home = require('./handlers/homeHandlers')(
-    io,
-    activeUsers,
-    activeSessions,
-    sessionService,
-    socketToUUID
-);
+const chat = require('./handlers/chatHandlers');
+const login = require('./handlers/loginHandlers')(sessionService);
+const home = require('./handlers/homeHandlers')(io, sessionService);
+const profile = require('./handlers/profileHandlers')(sessionService);
 
-const profile = require('./handlers/profileHandlers')(
-    activeUsers,
-    sessionService,
-);
-
-const disconnect = require('./handlers/disconnectHandler')(
-    socketToUUID,
-    activeUsers,
-    sessionService
-);
+const disconnect = require('./handlers/disconnectHandler');
 
 // --- IDENTITY MIDDLEWARE ---
 // Only runs once at the start, won't have the verified properties attached to them yet.
@@ -77,6 +66,7 @@ io.use((socket, next) => {
     // if missing/incorrect, still let user connect for create/join, but don't attach "verified" badge
     if (cleanUserUUID && activeUsers[cleanUserUUID]) {
         const user = activeUsers[cleanUserUUID];
+        user.lastSeen = Date.now();
 
         // verify user belongs to session
         const isUserInSession = user.sessionID === cleanSessionID;
@@ -92,7 +82,7 @@ io.use((socket, next) => {
             socketToUUID[socket.id] = cleanUserUUID;
             console.log(`[AUTH] ${user.name} verified for session ${cleanSessionID}`);
         } else {
-            console.log(`[AUTH] Warning: ${user.name} tried to access unauthorized session ${cleanSessionID}`);
+            console.warn(`[AUTH] Warning: ${user.name} tried to access unauthorized session ${cleanSessionID}`);
         }
     }
 
@@ -105,51 +95,60 @@ io.on('connection', (socket) => { // an event listener -- waits for user to open
     // socket.on('..', (ALWAYS gives data, eg. message))
     console.log(`New user connected: ${socket.id}`);
  
+    //------------------------ LOGIN LISTENERS --------------------------------------------
     // ---- CREATE SESSION -----
-    socket.on('create-session', handleEvent('create-session', socket, ['isPublic'], 
-        login.handleCreateSession));
+    socket.on('create-session', handleEvent('create-session', socket, ['?existingUUID', '?existingProfile'], 
+        login.handleCreateSession, false));
 
     // ---- JOIN A SESSION ----
-    socket.on('join-session', handleEvent('join-session', socket, ['sessionID', 'isPublic'], 
-        login.handleJoinSession));
+    socket.on('join-session', handleEvent('join-session', socket, ['sessionID', '?existingUUID', '?existingProfile'], 
+        login.handleJoinSession, false));
 
+    //------------------------ PROFILE LISTENERS --------------------------------------------
     // ---- UPDATE PROFILE -----
     socket.on('update-user', handleEvent('update-user', socket, ['profile'], 
-        profile.handleUpdateUser));
+        profile.handleUpdateUser, true));
 
+    //------------------------ HOME LISTENERS & DISCONNECT ----------------------------------
     // --- CASE 1: user voluntarily leaves session (exit session)
-    socket.on('leave-session', handleEvent('leave-session', socket, ['sessionID', 'isPublic'], 
-        home.handleLeaveSession));
+    socket.on('leave-session', handleEvent('leave-session', socket, ['sessionID'], 
+        home.handleLeaveSession, false));
 
     // ---- CASE 2: DISCONNECT (eg. unexpected exits, closing the app) ----------
     socket.on('disconnect', () => disconnect.handleOnDisconnect(socket));
 
     // --- CASE 3: Host ends session for everyone ----
     socket.on('end-session', handleEvent('end-session', socket, ['sessionID'], 
-        home.handleEndSession));
+        home.handleEndSession, true));
 
     // --- CASE 4: host removes a specific user ---
     socket.on('remove-user', handleEvent('remove-user', socket, ['sessionID', 'userUUIDToRemove'], 
-        home.handleRemoveUser));
+        home.handleRemoveUser, true));
 
     // --- TRANSFER HOST STATUS ----
     socket.on('transfer-host', handleEvent('transfer-host', socket, ['sessionID', 'newHostUUID'], 
-        home.handleTransferHost));
+        home.handleTransferHost, true));
 
+    //------------------------ CHAT LISTENERS --------------------------------------------
+    // --- SEND MSG ---
     socket.on('send-message', handleEvent('send-message', socket, ['msgID', 'chatRoomID', 'context'], 
-        chat.handleSendMsg));
+        chat.handleSendMsg, true));
 
+    // --- EDIT MSG ---
     socket.on('edit-message', handleEvent('edit-message', socket, ['msgID', 'chatRoomID', 'newText'], 
-        chat.handleEditMsg));
+        chat.handleEditMsg, true));
 
+    // --- DELETE MSG ---
     socket.on('delete-message', handleEvent('delete-message', socket, ['msgID', 'chatRoomID'], 
-        chat.handleDeleteMsg));
+        chat.handleDeleteMsg, true));
 
+    // --- TYPING INDICATOR ---
     socket.on('typing', handleEvent('typing', socket, ['chatRoomID'], 
-        chat.handleTyping));
+        chat.handleTyping, true));
 
+    // --- STOP TYPING INDICATOR ---
     socket.on('stop-typing', handleEvent('stop-typing', socket, ['chatRoomID'], 
-        chat.handleStopTyping));
+        chat.handleStopTyping, true));
 
 });
 

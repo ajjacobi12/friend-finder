@@ -23,6 +23,14 @@
         .btn-transfer { background: #f39c12; color: white; margin-left: 5px; }
         .btn-dm { background: #6f42c1; color: white; margin-left: 5px; }
 
+        /* --- user display styles ---*/
+        .user-offline { 
+            background-color: #eeeeee !important; 
+            opacity: 0.6; 
+            filter: grayscale(1); 
+            transition: 0.3s;
+        }
+
         /* --- Color Picker Styles --- */
         .color-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 10px; margin-bottom: 15px; }
         .color-circle { width: 35px; height: 35px; border-radius: 50%; cursor: pointer; border: 3px solid transparent; transition: 0.1s; }
@@ -43,6 +51,10 @@
         .my-msg { align-self: flex-end !important; background-color: #007bff !important; color: white !important; margin-left: auto !important; }
         .their-msg { align-self: flex-start !important; background-color: #e5e5ea !important; color: black !important; margin-right: auto !important; }
         .dm-msg { border: 2px solid #6f42c1; }
+        .msg-low-opacity {
+            opacity: 0.5;
+            transition: opacity 0.3s ease;
+        }
         
         .typing-indicator { font-size: 12px; font-style: italic; color: #888; height: 20px; margin-bottom: 5px; }
         ul { list-style: none; padding: 0; }
@@ -64,8 +76,9 @@
         </div>
         <div class="card">
             <h3>Create Session</h3>
-            <input type="text" id="createIdInput" class="setup-input" placeholder="New Room ID">
-            <button class="btn-create" onclick="createSession()">Create</button>
+            <button class="btn-create" style="width: 100%; padding: 15px;" onclick="createSession()">
+                🚀 Create New Room
+            </button>
         </div>
         <div class="card">
             <h3>Join Session</h3>
@@ -80,9 +93,12 @@
             <button onclick="exitDM()" style="background: white; color: #6f42c1; padding: 2px 8px;">Back to Room</button>
         </div>
 
-        <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
             <h3>Session: <span id="currentRoomDisplay"></span></h3>
-            <button style="background:#6c757d; color:white;" onclick="location.reload()">🚪 Leave</button>
+            <div style="display: flex; gap: 5px;">
+                <button id="endSessionBtn" style="background:#dc3545; color:white; display:none;" onclick="endSession()">💥 End All</button>
+                <button id="leaveBtn" style="background:#6c757d; color:white;" onclick="handleLeaveAttempt()">🚪 Leave</button>
+            </div>
         </div>
 
         <div class="card" style="border: 1px solid #eee; padding: 10px; border-radius: 8px; background: #fff; margin-bottom: 10px;">
@@ -113,13 +129,18 @@
     const colorOptions = ['#a0220c', '#2e8b56', '#1e8fff', '#ffd900', '#8824ec', '#2ec4ff', '#ff9500', '#095517', '#ff00f7', '#091490', '#09f34f', '#ff0000'];
     let myBrowserColor = '#1e8fff';
     
+    // Start with whatever is in storage, or null if it's a first-time visit
     let myUUID = localStorage.getItem('browser_uuid');
-    if (!myUUID) {
-        myUUID = 'browser-' + Math.random().toString(36).substr(2, 9);
-        localStorage.setItem('browser_uuid', myUUID);
-    }
-    document.getElementById('uuidDisplay').innerText = myUUID;
 
+    // We don't need the "browser-random" logic anymore because the 
+    // join/create functions will handle the assignment.
+    if (myUUID) {
+        document.getElementById('uuidDisplay').innerText = myUUID;
+    } else {
+        document.getElementById('uuidDisplay').innerText = "Assigning ID...";
+    }
+
+    let allActiveUsers = {};
     let myCurrentRoom = null;
     let activeDM = null; 
     let amIHost = false;
@@ -146,10 +167,12 @@
     function syncUserUpdate() {
         if (!myCurrentRoom) return;
         socket.emit('update-user', { 
-            name: document.getElementById('nameInput').value, 
-            uuid: myUUID, 
-            sessionId: myCurrentRoom,
-            color: myBrowserColor
+            profile: {
+                name: document.getElementById('nameInput').value, 
+                // uuid: myUUID, 
+                // sessionID: myCurrentRoom,
+                color: myBrowserColor
+            }
         });
     }
 
@@ -160,7 +183,7 @@
     });
 
     socket.on('message-edited', (data) => {
-        const msgElement = document.querySelector(`[data-msg-id="${data.messageID}"]`);
+        const msgElement = document.querySelector(`[data-msg-id="${data.msgID}"]`);
         if (msgElement) {
             const textDiv = msgElement.querySelector('.msg-text');
             textDiv.innerText = data.newText;
@@ -173,29 +196,41 @@
         }
     });
 
-    socket.on('message-deleted', (data) => {
-        const msgElement = document.querySelector(`[data-msg-id="${data.messageID}"]`);
-        if (msgElement) {
-            msgElement.innerHTML = `<span class="deleted-msg">${data.userName} deleted this message.</span>`;
-            if (msgElement.querySelector('.msg-actions')) msgElement.querySelector('.msg-actions').remove();
-        }
+    socket.on('receive-message', (data) => {
+        const currentView = activeDM ? activeDM.chatRoomID : myCurrentRoom;
+        if (data.chatRoomID !== currentView) return;
+
+        const senderName = allActiveUsers[data.senderUUID]?.name || "Unknown";
+
+        displayMessage({
+            msgID: data.msgID, // CHANGED: Consistency with the rest of your app
+            sender: senderName,
+            senderUUID: data.senderUUID,
+            context: data.context,
+        }, false, data.chatRoomID.includes('_'));
     });
 
-    socket.on('receive-message', (data) => {
-        const isMe = data.senderUUID === myUUID;
-        if (isMe) return;
-        const isDM = data.isDirectMessage === true || data.roomID.includes('_');
-        if (isDM) {
-            if (!activeDM) enterDM(data.senderUUID, data.sender);
-            if (data.roomID === activeDM?.roomID) displayMessage(data, false, true);
-        } else if (data.roomID === myCurrentRoom && !activeDM) {
-            displayMessage(data, false, false);
+    socket.on('message-deleted', (data) => {
+        const msgEl = document.querySelector(`[data-msg-id="${data.msgID}"]`);
+        if (msgEl) {
+            msgEl.innerHTML = `<span class="deleted-msg">This message was deleted.</span>`;
+            msgEl.style.opacity = "0.5";
         }
     });
 
     socket.on('user-typing', (data) => {
-        if (data.roomID === (activeDM ? activeDM.roomID : myCurrentRoom)) {
-            if (data.id !== socket.id) document.getElementById('typingArea').innerText = `${data.name} is typing...`;
+        const currentView = activeDM ? activeDM.chatRoomID : myCurrentRoom;
+        
+        if (data.chatRoomID === currentView) {
+            // 1. Use userUUID instead of id
+            // 2. Ensure we don't show "You are typing" to ourselves
+            if (data.userUUID !== myUUID) { 
+                // 3. Lookup the name using the UUID
+                const typingUser = allActiveUsers[data.userUUID];
+                const displayName = typingUser ? typingUser.name : "Someone";
+                
+                document.getElementById('typingArea').innerText = `${displayName} is typing...`;
+            }
         }
     });
 
@@ -204,122 +239,277 @@
     socket.on('host-change', (newHostId) => { amIHost = (myUUID === newHostId); });
 
     socket.on('user-update', (users) => {
+        // Standard practice: Update a global lookup object for name resolution
+        // This is what we'll use for "User is typing..." names!
+        allActiveUsers = {}; 
+        users.forEach(u => allActiveUsers[u.uuid] = u);
+
+        // determine if host
+        const me = users.find(u => u.uuid === myUUID);
+        amIHost = me ? !!me.isHost : false;
+
+        renderUserList();
+    });
+
+    socket.on('removed-from-session', () => { alert("Removed from session."); location.reload(); });
+
+    socket.on('session-ended', () => { alert("Session ended."); location.reload(); });
+
+    socket.on('user-status-change', (data) => {
+        // 1. Update our local "phonebook"
+        if (allActiveUsers[data.userUUID]) {
+            allActiveUsers[data.userUUID].status = data.status;
+            
+            // 2. Trigger the refresh of the UI list locally
+            renderUserList(); 
+        }
+    });
+
+    // --- ACTIONS ---
+
+    // --- LEAVE / END SESSION LOGIC ---
+    function handleLeaveAttempt() {
+        const users = Object.values(allActiveUsers);
+        const otherUsers = users.filter(u => u.uuid !== myUUID);
+
+        // If I am host and others are here, I must promote someone else first
+        if (amIHost && otherUsers.length > 0) {
+            alert("You are the host! Please 'Promote' someone else before leaving, or 'End All'.");
+            return;
+        }
+
+        // Otherwise, just leave cleanly
+        socket.emit('leave-session', { sessionID: myCurrentRoom }, (res) => {
+            if (res.success) {
+                location.reload(); // Hard reset back to login screen
+            }
+        });
+    }
+
+    function endSession() {
+        // No alert needed as per your request, just nuke it
+        socket.emit('end-session', { sessionID: myCurrentRoom }, (res) => {
+            if (res.success) {
+                location.reload();
+            }
+        });
+    }
+
+   function renderUserList() {
         const list = document.getElementById('userList');
         list.innerHTML = '';
+        
+        const users = Object.values(allActiveUsers);
 
-        // 1. Reset (Corrected Casing)
-        amIHost = false; 
-
-        // 2. Find "Me" first to set the host flag correctly for this render cycle
-        const me = users.find(u => u.id === myUUID);
-        if (me && me.isHost) amIHost = true;
-
-        // 3. Now render everyone
         users.forEach(u => {
-            const isMe = u.id === myUUID; 
+            const isMe = u.uuid === myUUID; 
+            const isOffline = u.status === 'offline';
             
             const li = document.createElement('li');
+            if (isOffline) li.classList.add('user-offline');
+
             li.innerHTML = `
                 <div style="display:flex; align-items:center;">
                     <div style="width:12px; height:12px; border-radius:50%; background:${u.color}; margin-right:8px; border:1px solid #ccc;"></div>
-                    ${u.isHost ? '<span class="crown">👑</span>' : ''} ${u.name} ${isMe ? '<i>(You)</i>' : ''}
+                    ${u.isHost ? '<span class="crown">👑</span>' : ''} 
+                    ${u.name} ${isMe ? '<i>(You)</i>' : ''} 
+                    ${isOffline ? '<small style="margin-left:5px; color:#666;">(Offline)</small>' : ''}
                 </div>
                 <div>
-                    ${!isMe ? `<button class="btn-dm" onclick="enterDM('${u.id}', '${u.name}')">DM</button>` : ''}
+                    ${!isMe && !isOffline ? `<button class="btn-dm" onclick="enterDM('${u.uuid}', '${u.name}')">DM</button>` : ''}
                     ${amIHost && !isMe ? `
-                        <button class="btn-transfer" onclick="transferHost('${u.id}')">Promote</button>
-                        <button class="btn-kick" onclick="removeUser('${u.id}')">Kick</button>
+                        <button class="btn-transfer" onclick="transferHost('${u.uuid}')">Promote</button>
+                        <button class="btn-kick" onclick="removeUser('${u.uuid}')">Kick</button>
                     ` : ''}
                 </div>
             `;
             list.appendChild(li);
         });
-    });
-
-    socket.on('removed-from-session', () => { alert("Removed from session."); location.reload(); });
-
-    // --- ACTIONS ---
-    function createSession() {
-        const roomID = document.getElementById('createIdInput').value.toUpperCase();
-        if (!roomID) return;
-        socket.emit('create-session', { roomID, existingUUID: myUUID }, () => setupUI(roomID));
+        
+        // Ensure "End Session" button stays in sync
+        const endBtn = document.getElementById('endSessionBtn');
+        if (endBtn) {
+            endBtn.style.display = amIHost ? 'block' : 'none';
+        }
     }
 
-    function joinSession() {
-        const roomID = document.getElementById('joinIdInput').value.toUpperCase();
-        if (!roomID) return;
-        socket.emit('join-session', { roomID, existingUUID: myUUID }, (res) => {
-            if (res.exists) setupUI(roomID);
-            else alert("Room not found");
+    function createSession() {
+        socket.emit('create-session', { 
+            existingUUID: null, // Send current (null or old)
+            existingProfile: { 
+                name: document.getElementById('nameInput').value, 
+                color: myBrowserColor 
+            } 
+        }, (res) => {
+            if (res && res.success) {
+                // 1. Sync the User UUID (The "Identity Sync")
+                if (res.userUUID) {
+                    myUUID = res.userUUID;
+                    localStorage.setItem('browser_uuid', myUUID);
+                    document.getElementById('uuidDisplay').innerText = myUUID;
+                }
+
+                // 2. Transition to the room
+                // Note: res.sessionID comes from the backend's finalizeSession
+                setupUI(res.sessionID);
+                console.log("Session Created Successfully:", res.sessionID);
+            } else {
+                alert("Error creating session: " + (res.error || "Unknown Error"));
+            }
         });
     }
 
-    function setupUI(roomID) {
-        myCurrentRoom = roomID;
+    function joinSession() {
+        const sessionID = document.getElementById('joinIdInput').value.trim().toUpperCase();
+        if (!sessionID) return;
+
+        socket.emit('join-session', { 
+            sessionID, 
+            existingUUID: null, 
+            existingProfile: { 
+                name: document.getElementById('nameInput').value, 
+                color: myBrowserColor 
+            } 
+        }, (res) => {
+            if (res.success || res.exists) {
+                if (res.userUUID) {
+                    myUUID = res.userUUID;
+                    localStorage.setItem('browser_uuid', myUUID);
+                    document.getElementById('uuidDisplay').innerText = myUUID;
+                }
+                setupUI(sessionID);
+            } else {
+                alert("Room not found or session full.");
+            }
+        });
+    }
+
+    function setupUI(sessionID) {
+        myCurrentRoom = sessionID; // Ensure this matches the server's cleanSessionID
         document.getElementById('setupArea').style.display = 'none';
         document.getElementById('roomArea').style.display = 'block';
-        document.getElementById('currentRoomDisplay').innerText = roomID;
+        document.getElementById('currentRoomDisplay').innerText = sessionID;
         renderColorPicker();
         syncUserUpdate();
+
+        window.addEventListener('beforeunload', () => {
+            if (myCurrentRoom) {
+                socket.emit('leave-session', { sessionID: myCurrentRoom });
+                socket.disconnect(); // Force the buffer to flush before the page dies
+            }
+        });
     }
 
     function enterDM(targetUUID, targetName) {
+        // 1. Keep the ID generation (Auuid_Buuid) to filter your local chat view
         const dmRoomID = [myUUID, targetUUID].sort().join('_');
-        activeDM = { uuid: targetUUID, name: targetName, roomID: dmRoomID };
-        socket.emit('join-dm', { dmRoomID, targetName: targetName });
+        
+        // 2. Update your local state
+        activeDM = { uuid: targetUUID, name: targetName, chatRoomID: dmRoomID };
+        
+        // 3. UI Updates
         document.getElementById('dmIndicator').style.display = 'flex';
         document.getElementById('dmTargetName').innerText = targetName;
+        
+        // 4. Clear the chat area to show only DM history (if you're storing it)
         document.getElementById('chatArea').innerHTML = ''; 
+        
+        // NOTE: socket.emit('join-dm') is REMOVED. 
+        // The backend already knows your UUID and handles routing via your handlers.
+        console.log(`Entering DM view with ${targetName} (${dmRoomID})`);
     }
 
     function exitDM() {
         activeDM = null;
         document.getElementById('dmIndicator').style.display = 'none';
+        document.getElementById('dmTargetName').innerText = '';
+        
+        // Clear DM messages and let your main chat logic re-render the session messages
         document.getElementById('chatArea').innerHTML = ''; 
+        
+        console.log("Returned to Global Session Chat");
     }
 
     function handleTyping() {
-        socket.emit('typing', { roomID: activeDM ? activeDM.roomID : myCurrentRoom, name: document.getElementById('nameInput').value });
+        // Determine the room ID (session ID or DM room ID)
+        const currentRoomID = activeDM ? activeDM.chatRoomID : myCurrentRoom;
+
+        // REMOVED 'name' - the server already knows who you are via the socket session!
+        socket.emit('typing', { chatRoomID: currentRoomID });
+
         clearTimeout(typingTimeout);
         typingTimeout = setTimeout(() => {
-            socket.emit('stop-typing', { roomID: activeDM ? activeDM.roomID : myCurrentRoom });
+            socket.emit('stop-typing', { chatRoomID: currentRoomID });
         }, 2000);
     }
 
     function sendChat() {
         const input = document.getElementById('chatInput');
         const text = input.value.trim();
-        const myName = document.getElementById('nameInput').value;
         if (!text) return;
 
+        // Use the unified room ID logic you established in the backend
+        const currentRoomID = activeDM ? activeDM.chatRoomID : myCurrentRoom;
+        if(!currentRoomID) return;
+
         if (editingMsgID) {
-            socket.emit('edit-message', { roomID: activeDM ? activeDM.roomID : myCurrentRoom, messageID: editingMsgID, newText: text });
-            const msgEl = document.querySelector(`[data-msg-id="${editingMsgID}"]`);
-            if (msgEl) {
-                msgEl.querySelector('.msg-text').innerText = text;
-                if (!msgEl.querySelector('.edited-indicator')) {
-                    const span = document.createElement('span');
-                    span.className = 'edited-indicator'; span.innerText = ' (edited)';
-                    msgEl.querySelector('.msg-text').appendChild(span);
+            // Updated to use 'msgID' to match CLEANING_MAP
+            socket.emit('edit-message', { 
+                chatRoomID: currentRoomID, 
+                msgID: editingMsgID, 
+                newText: text 
+            }, (response) => {
+                if (response.success) {
+                    const msgEl = document.querySelector(`[data-msg-id="${editingMsgID}"]`);
+                    if (msgEl) {
+                        msgEl.querySelector('.msg-text').innerText = text;
+                        // ... (rest of your edit UI logic)
+                    }
+                    cancelEdit();
                 }
-            }
-            cancelEdit();
+            });
         } else {
+            // Generate a clean UUID for the message (standard practice)
+            const msgID = (window.crypto && window.crypto.randomUUID) 
+                ? window.crypto.randomUUID() 
+                : 'msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+
             const messageData = {
-                id: 'msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
-                roomID: activeDM ? activeDM.roomID : myCurrentRoom,
-                sender: myName, senderUUID: myUUID, context: { text: text },
-                color: myBrowserColor, serverTimestamp: Date.now(), isDM: !!activeDM
+                msgID: msgID, // CHANGED from 'id' to 'msgID'
+                chatRoomID: currentRoomID,
+                context: { 
+                    text: text,
+                    isEncrypted: false, // Matches your msgContextSchema
+                    version: "1.0"
+                }
             };
-            if (activeDM) {
-                socket.emit('send-direct-message', { id: messageData.id, recipientUUID: activeDM.uuid, context: messageData.context, senderUUID: myUUID, fromName: myName });
-            } else {
-                socket.emit('send-message', { id: messageData.id, roomID: myCurrentRoom, context: messageData.context, senderUUID: myUUID, sender: myName });
-            }
-            displayMessage(messageData, true, !!activeDM);
+
+            // UNIFIED EVENT: No more 'send-direct-message'
+            socket.emit('send-message', messageData, (response) => {
+                if (response.success) {
+                    // Find the optimistic message by ID and make it solid (1.0 opacity)
+                    const msgEl = document.querySelector(`[data-msg-id="${msgID}"]`);
+                    if (msgEl) msgEl.classList.remove('msg-low-opacity');
+                    // Now that server confirmed, we could update status if we wanted
+                    console.log("Message delivered at:", response.serverTimestamp);
+                } else {
+                    console.error("Message failed:", response.error);
+                }
+            });
+
+            // Optimistic UI Update
+            displayMessage({
+                msgID: msgID,         // CHANGED from id to msgID
+                sender: "You",
+                senderUUID: myUUID,
+                context: messageData.context,
+                isDM: !!activeDM,
+                status: 'pending'     // Adding this ensures your lower opacity logic kicks in!
+            }, true, !!activeDM);
         }
+
         input.value = '';
-        socket.emit('stop-typing', { roomID: activeDM ? activeDM.roomID : myCurrentRoom });
+        socket.emit('stop-typing', { chatRoomID: currentRoomID });
     }
 
     function prepareEdit(msgID, currentText) {
@@ -339,35 +529,58 @@
 
     function confirmDelete(msgID) {
         if (confirm("Delete this message?")) {
-            socket.emit('delete-message', { roomID: activeDM ? activeDM.roomID : myCurrentRoom, messageID: msgID, userName: document.getElementById('nameInput').value });
-            const msgEl = document.querySelector(`[data-msg-id="${msgID}"]`);
-            if (msgEl) {
-                msgEl.innerHTML = `<span class="deleted-msg">You deleted this message.</span>`;
-                msgEl.style.opacity = "0.6";
-            }
+            const currentRoomID = activeDM ? activeDM.chatRoomID : myCurrentRoom;
+            
+            // Changed field name to msgID
+            socket.emit('delete-message', { 
+                chatRoomID: currentRoomID, 
+                msgID: msgID 
+            }, (response) => {
+                if (response.success) {
+                    const msgEl = document.querySelector(`[data-msg-id="${msgID}"]`);
+                    if (msgEl) {
+                        msgEl.innerHTML = `<span class="deleted-msg">You deleted this message.</span>`;
+                        msgEl.style.opacity = "0.5";
+                    }
+                }
+            });
         }
     }
 
-    function transferHost(targetId) { if(confirm("Promote user to host?")) socket.emit('transfer-host', { roomID: myCurrentRoom, newHostUUID: targetId }); }
-    function removeUser(targetId) { if(confirm("Kick user?")) socket.emit('remove-user', { roomID: myCurrentRoom, userUUIDToRemove: targetId }); }
+    function transferHost(targetId) { if(confirm("Promote user to host?")) socket.emit('transfer-host', { sessionID: myCurrentRoom, newHostUUID: targetId }); }
+    function removeUser(targetId) { if(confirm("Kick user?")) socket.emit('remove-user', { sessionID: myCurrentRoom, userUUIDToRemove: targetId }); }
 
     function displayMessage(data, amISender, isDM) {
         const chatArea = document.getElementById('chatArea');
-        if (data.id && document.querySelector(`[data-msg-id="${data.id}"]`)) return;
+        
+        // 1. UPDATED: use data.msgID instead of data.id
+        const messageID = data.msgID || data.id; 
+        if (messageID && document.querySelector(`[data-msg-id="${messageID}"]`)) return;
+
         const div = document.createElement('div');
-        div.className = `msg ${amISender ? 'my-msg' : 'their-msg'} ${isDM ? 'dm-msg' : ''}`;
-        if (data.id) div.setAttribute('data-msg-id', data.id);
+        
+        // 2. SAVED PREFERENCE: Apply lower opacity if status is pending or failed
+        const statusClass = (data.status === 'pending' || data.status === 'failed') ? 'msg-low-opacity' : '';
+        div.className = `msg ${amISender ? 'my-msg' : 'their-msg'} ${isDM ? 'dm-msg' : ''} ${statusClass}`;
+        
+        if (messageID) div.setAttribute('data-msg-id', messageID);
+
+        // 3. UPDATED: Contextual text nesting
         const text = data.context?.text || data.text || "...";
+
         div.innerHTML = `
-            <span style="font-size: 10px; font-weight: bold; margin-bottom: 2px; opacity: 0.8;">${isDM ? '🔒 ' : ''}${amISender ? 'You' : data.sender}</span>
+            <span style="font-size: 10px; font-weight: bold; margin-bottom: 2px; opacity: 0.8;">
+                ${isDM ? '🔒 ' : ''}${amISender ? 'You' : data.sender}
+            </span>
             <div class="msg-text">${text}</div>
             ${amISender ? `
                 <div class="msg-actions">
-                    <button class="btn-msg-action" onclick="prepareEdit('${data.id}', '${text.replace(/'/g, "\\'")}')">Edit</button>
-                    <button class="btn-msg-action" onclick="confirmDelete('${data.id}')">Delete</button>
+                    <button class="btn-msg-action" onclick="prepareEdit('${messageID}', '${text.replace(/'/g, "\\'")}')">Edit</button>
+                    <button class="btn-msg-action" onclick="confirmDelete('${messageID}')">Delete</button>
                 </div>
             ` : ''}
         `;
+
         chatArea.appendChild(div);
         chatArea.scrollTop = chatArea.scrollHeight;
     }

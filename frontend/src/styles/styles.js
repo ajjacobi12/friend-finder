@@ -40,10 +40,10 @@ export const styles = StyleSheet.create({
     friendBadge: {
         flexDirection: 'row',
         alignItems: 'center',
-        height: 50,
+        height: 40,
         justifyContent: 'space-between',
         backgroundColor: '#f0f0f5',
-        paddingVertical: 10,
+        paddingVertical: 5,
         paddingHorizontal: 15,
         borderRadius: 12,
         marginTop: 0,
@@ -75,6 +75,7 @@ export const styles = StyleSheet.create({
         borderRadius: 10,
         marginTop: 20,
         alignItems: 'center',
+        justifyContent: 'center',
     },
     buttonText: {
         color: '#fff',               // White text on the blue button
@@ -131,9 +132,9 @@ export const styles = StyleSheet.create({
         backgroundColor: '#ffffff',
         borderColor: '#ff3b301f',
         shadowColor: '#ff3b30',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 6,
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
         elevation: 10,
     },
     // Danger Variant (Pressed)
@@ -158,6 +159,15 @@ export const styles = StyleSheet.create({
     },
     
     // chat specific styles
+    unreadMsgButton: {
+        backgroundColor: '#f0f7ff',
+        shadowColor: '#53aeff',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.8,
+        shadowRadius: 17,
+        elevation: 4,
+        borderRadius: 12,
+    },
     messageBubble: {
         padding: 10,
         borderRadius: 10,
@@ -185,22 +195,22 @@ export const styles = StyleSheet.create({
     },
     messageInput: {
         flex: 1,
-        height: 40,
         borderColor: '#ddd',
         borderWidth: 1,
         borderRadius: 20,
         paddingHorizontal: 15,
         marginRight: 10,
         backgroundColor: '#fff',
-        height: 45,
+        paddingBottom: 5,
+        paddingTop: 7,
         fontSize: 18
     },
     sendButton: {
         justifyContent: 'center',
         alignItems: 'center',
         paddingHorizontal: 15,
-        paddingVertical: 10,
-        height: 40,
+        paddingVertical: 5,
+        height: 35,
         backgroundColor: '#007aff',
         borderRadius: 20,
     },
@@ -259,7 +269,6 @@ export const styles = StyleSheet.create({
     },
     scrollToBottomButton: {
         position: 'absolute',
-        bottom: 80,
         right: 20,
         backgroundColor: '#ffffff',
         width: 40,

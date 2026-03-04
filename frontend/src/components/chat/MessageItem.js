@@ -2,21 +2,26 @@
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';
 
+import { useUser } from '../../context/UserContext';
 import { styles } from '../../styles/styles';
 
 const MessageItem = React.memo(({ item, userUUID, onLongPress, onResend, editTimeLimit }) => {
     const { 
-        msgID, 
-        senderUUID, senderName, 
+        senderUUID, 
         context, 
         status, 
         timestamp, 
         isDeleted, isEdited 
     } = item;
 
+    const { friends, selectedColor: myColor } = useUser();
+
     const isFailed = status === 'failed';
     const isPending = status === 'pending';
     const isMine = senderUUID === userUUID;
+    const sender = isMine 
+        ? { name: 'You', color: myColor } 
+        : (friends.find(f => f.uuid === senderUUID) || { name: 'Unknown', color: '#888' });
 
     const handleLongPress = () => {
         // no actions on failed, pending, or deleted messages
@@ -38,14 +43,13 @@ const MessageItem = React.memo(({ item, userUUID, onLongPress, onResend, editTim
                 styles.messageBubble, 
                 isMine ? styles.myMessage : styles.theirMessage,
                 isFailed && { opacity: 0.7, borderColor: 'red', borderWidth: 1},
-                isPending && {opacity: 0.6 },
-                isDeleted && styles.deletedBubble
+                isPending && {opacity: 0.6 }
             ]}
         >
             {/* --- SENDER & TIMESTAMP --- */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontWeight: 'bold', color: '#555', fontSize: 12 }}>
-                    {isMine ? 'You' : (senderName)} • { timestamp
+                    {sender.name} • { timestamp
                         ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                         : isMine ? (isFailed ? "Failed" : "Sending...") : "Just now" }
                 </Text>

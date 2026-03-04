@@ -1,12 +1,13 @@
-// useProfileLogic.js
-import React, { useState, useCallback, useEffect } from 'react'; // useState lets app remember things (eg. messages), useEffect allows app to perform actions (eg. connecting ot the server) as soon as it opens
+// frontend/src/hooksuseProfileLogic.js
+import React, { useState, useCallback, useEffect } from 'react'; 
 import { Keyboard } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { useUser } from '../context/UserContext';
 import { leaveSessionAction, updateUserAction } from '../services/socketServices';
 import { useSessionBackHandler } from './useSessionBackHandler';
-import { validate, desanitize } from '../services/validation';
+import { validate, UserProfileSchema } from '../services/validation';
+import { storageService } from '../services/storageService';
 
 export const useProfileLogic = ({ navigation, colorOptions }) => {
     const { 
@@ -14,7 +15,7 @@ export const useProfileLogic = ({ navigation, colorOptions }) => {
         selectedColor, setSelectedColor, 
         friends, sessionID,
         hasRegistered, setHasRegistered, 
-        handleCleanExit 
+        handleCleanExit, updateDiskPrefs
     } = useUser();
     const [tempName, setTempName] = useState(name);
     const [errorMsg, setErrorMsg] = useState(""); 
@@ -41,6 +42,10 @@ export const useProfileLogic = ({ navigation, colorOptions }) => {
 
         try {
             await updateUserAction(result.data.name, result.data.color);
+            await storageService.savePrefs({ name: result.data.name, color: result.data.color });
+            
+            const current = await storageService.loadPrefs();
+            console.log("current prefs:", current);
 
             setName(tempName.trim());
             setHasRegistered(true);
@@ -61,6 +66,8 @@ export const useProfileLogic = ({ navigation, colorOptions }) => {
         if (hasRegistered) {
             try {
                 await updateUserAction(tempName.trim() || name, color);
+                await updateDiskPrefs({ name: (tempName.trim() || name), color });
+
                 if (tempName.trim() !== name) {
                     setName(tempName.trim());
                 }
@@ -105,6 +112,7 @@ export const useProfileLogic = ({ navigation, colorOptions }) => {
             // CASE 1: The user has joined, do nothing
             if (hasRegistered) return;
             // CASE 2: user has not registered, redirect them to login and cleanup
+            e.preventDefault();
             performLeaveCleanup();
         });
 
@@ -113,16 +121,17 @@ export const useProfileLogic = ({ navigation, colorOptions }) => {
 
     // --- REMEMBER PREVIOUS NAME ENTERED ----
     useEffect(() => {
-        if (name && !tempName) {
+        if (name && name !== "New User" && !tempName) {
             setTempName(name);
         }
     }, [name]);
 
     // --- SET INITIAL JOIN COLOR -----
     useEffect(() => {
+        // console.log("selected color: ", selectedColor);
         if (!hasRegistered) {
             const takenColors = friends.map(f => f.color);
-            if (!selectedColor || takenColors.includes(selectedColor)) {
+            if (selectedColor === '#cccccc' || takenColors.includes(selectedColor)) {
                 const firstAvailable = colorOptions.find(color => !takenColors.includes(color));
                 if (firstAvailable) setSelectedColor(firstAvailable);
             }
@@ -138,6 +147,8 @@ export const useProfileLogic = ({ navigation, colorOptions }) => {
                     if (hasRegistered && tempName.trim() !== "" && tempName.trim() !== name) {
                         try {
                             await updateUserAction(tempName.trim(), selectedColor);
+                            await updateDiskPrefs({ name: tempName.trim(), color: selectedColor });
+
                             setName(tempName.trim());
                         } catch (err) {
                             setTempName(name);

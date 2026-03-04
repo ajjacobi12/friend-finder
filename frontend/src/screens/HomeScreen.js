@@ -18,7 +18,7 @@ export default function HomeScreen({ navigation }) {
     // ---- STATE VARIABLES -----
     // app memory (state) to store the server's message
     // whenever "set" function is called, React Native automatically re-renders (refreshes) the screen to show the new info
-    const { name, selectedColor, sessionId, isHost, friends, socket } = useUser(); // Added socket here for the hiccup test
+    const { name, selectedColor, sessionID, isHost, friends, socket } = useUser(); // Added socket here for the hiccup test
     const { endSessionForAll, removeUser, handleTransferHost, leaveSession, 
         showTransfer, setShowTransfer } = useHomeLogic();  
 
@@ -60,7 +60,7 @@ export default function HomeScreen({ navigation }) {
             <StatusBar barStyle="dark-content" />
 
             {/* ---- START HEADER ---- */}
-            <View style={[styles.customHeader, { height: 60 + insets.top, paddingTop: insets.top }]}>
+            <View style={[styles.customHeader, { height: insets.top, paddingTop: 50 + insets.top }]}>
 
                 {/* ---- LEFT SLOT: LEAVE SESSION BUTTON,  ---- */}
                 <View style={{ width: 100, justifyContent: 'center' }}>
@@ -102,7 +102,7 @@ export default function HomeScreen({ navigation }) {
                 <View style={[styles.card, {width: '40%', backgroundColor: 'white', alignItems: 'center', padding: 10, marginTop: 20}]}> 
                     <Text style={{ color: '#242625', fontSize: 15, textTransform: 'uppercase', letterSpacing: 1 }}>Session ID</Text>
                     <Text style={{ fontSize: 24, fontWeight: 'bold', color: 'black', marginTop: 10 }}>
-                        {sessionId || "None"}
+                        {sessionID || "None"}
                     </Text>
                 </View>
  
@@ -129,10 +129,10 @@ export default function HomeScreen({ navigation }) {
                             repeatSpacer={50}
                             marqueeDelay={1000}
                             style={[ styles.friendIdText, 
-                                { fontSize: 20, fontWeight: 'bold', textAlignVertical: 'center', height: 50, lineHeight: 50  }
+                                { fontSize: 24, fontWeight: 'bold', textAlignVertical: 'center', height: 50, lineHeight: 50  }
                                 ]}
                         >
-                            {isHost ? '👑 ' : '⭐ '} { name || "Loading..."}
+                            {isHost ? '👑' : '⭐'} { name || "Loading..."}
                         </TextTicker>
                     </View>
                         

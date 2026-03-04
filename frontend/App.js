@@ -1,3 +1,4 @@
+// frontend/App.js
 // This file is the air traffic control of the app. It doesn't show much content, 
 // but it decides which screen/page is in front of the user andprovides global data
 // for those screens
@@ -112,7 +113,7 @@ function AppNavigator() {
 
   return (
     <Stack.Navigator 
-      initialRouteName="Login"
+      // initialRouteName="Login"
       screenOptions={{ headerShown: false }}
     >
       {!hasRegistered ? (

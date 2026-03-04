@@ -1,4 +1,4 @@
-// socketServices.js
+// frontend/src/services/socketServices.js
 import socket from '../api/socket';
 
 const infrastructureEvents = [
@@ -25,6 +25,7 @@ export const secureEmit = (eventName, data) => {
         } 
 
         socket.emit(eventName, finalData, (response) => {
+            console.log(`[secureEmit] Response for ${eventName}:`, response);
             clearTimeout(timeout); // cancel timeout if server responds
             // handle the response
             if (!response){
@@ -53,12 +54,12 @@ export const endSessionAction = (sessionID) => {
 };
 
 // ------- LOGIN FUNCTIONS -------
-export const createSessionAction = (existingUUID) => {
-    return secureEmit('create-session', { existingUUID });
+export const createSessionAction = (existingUUID, existingProfile) => {
+    return secureEmit('create-session', { existingUUID, existingProfile });
 };
 
-export const joinSessionAction = (sessionID, existingUUID) => {
-    return secureEmit('join-session', { sessionID, existingUUID });
+export const joinSessionAction = (sessionID, existingUUID, existingProfile) => {
+    return secureEmit('join-session', { sessionID, existingUUID, existingProfile });
 };
 
 // ------- PROFILE FUNCTIONS --------

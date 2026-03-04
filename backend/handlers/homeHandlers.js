@@ -1,9 +1,9 @@
 // homeHandlers.js
 
-module.exports = (io, activeUsers, activeSessions, sessionService, socketToUUID) => {
+module.exports = (io, sessionService) => {
     return {
         // --- user voluntarily leaves session (exit session)
-        handleLeaveSession: async ({ sessionID }, { user, userUUID, socket }, cb) => {
+        handleLeaveSession: async ({ sessionID }, { user, socket }, cb) => {
             
             // if user is gone from records, do nothing
             if (!user) return cb({ success: true });
@@ -11,16 +11,21 @@ module.exports = (io, activeUsers, activeSessions, sessionService, socketToUUID)
             if (user.sessionID !== sessionID) throw new Error (`User is not in session ${sessionID}.`);
 
             // if user was the host, pick a new one
-            if (user.isHost === true) sessionService.ensureHostExists(sessionID, userUUID);
+            if (user.isHost === true) {
+                const newHostFound = sessionService.ensureHostExists(sessionID, user.uuid);
+                if (!newHostFound) console.warn(`[HOST] No one left to take over. Room is hostless.`);
+            }
+
+            // save the name
+            const userName = user.name;
 
             // delete user data & remove sockets
-            delete activeUsers[userUUID];  
-            delete socketToUUID[socket.id];
-            socket.leave(sessionID);
-            socket.leave(userUUID);
+            // returns true if user was removed, false if not
+            const purged = sessionService.purgeUser(user.uuid, sessionID, socket);
+            if (!purged) throw new Error (`User ${userName} was unable to be purged.`);
 
             cb({ success: true });
-            sessionService.broadcastUpdate(sessionID, `User ${user.name || "Unknown User"} left.`);
+            sessionService.broadcastUpdate(sessionID, `User ${userName || "Unknown User"} left.`);
             
             // check if session is now empty
             setTimeout(() => {
@@ -38,21 +43,8 @@ module.exports = (io, activeUsers, activeSessions, sessionService, socketToUUID)
             io.to(sessionID).emit('session-ended');
 
             // delete all users' data in session
-            const session = io.sockets.adapter.rooms.get(sessionID);
-            session?.forEach(socketID => {
-                const socketObject = io.sockets.sockets.get(socketID);
-                const userUUID = socketToUUID[socketID];
-
-                socketObject?.leave(sessionID);
-                if (userUUID) socketObject?.leave(userUUID); 
-                delete socketToUUID[socketID];
-                delete activeUsers[userUUID];
-            });
-
-            // remove session from active sessions, 
-            // clear the session deletion timer if it exists
-            delete activeSessions[sessionID];
-            sessionService.cancelSessionDeletion(sessionID);
+            const purged = sessionService.purgeSession(sessionID);
+            if (!purged) throw new Error (`[END SESSION] failed in session ${sessionID}: missing sessionID or unable to retrive sockets.`);
 
             cb({ success: true });
             console.log(`Session ${sessionID} fully purged.`);
@@ -64,37 +56,40 @@ module.exports = (io, activeUsers, activeSessions, sessionService, socketToUUID)
             if (!user.isHost) throw new Error(`[REMOVE USER] Unauthorized attempt by ${user.name || socket.id} to remove user.`);
 
             // find victim, if they aren't in activeUsers they're already gone
-            const targetUser = activeUsers[userUUIDToRemove];
+            const targetUser = sessionService.getTargetUser(userUUIDToRemove, sessionID);
             if (!targetUser) return cb({ success: true });
 
+            // capture name now before removing all data
+            const targetName = targetUser.name || "User";
+
             // force victim socket to leave session
+            // keep in mind: if target user is disconnected (eg. 15s reconnection grace period)
+            //    targetSocket will be undefined, keep purgeUser outside of if(targetSocket) condition
             const targetSocket = io.sockets.sockets.get(targetUser.socketID);
             if (targetSocket) {
                 targetSocket.emit('removed-from-session'); 
-                targetSocket.leave(sessionID); 
-                targetSocket.leave(userUUIDToRemove);
             }
-
-            // cleanup & notify
-            delete socketToUUID[targetUser.socketID];
-            delete activeUsers[userUUIDToRemove]; 
+            // returns true if user was removed, false if not
+            const purged = sessionService.purgeUser(userUUIDToRemove, sessionID, targetSocket);
+            if (!purged) throw new Error (`[REMOVE USER] User ${targetName} was unable to be purged.`);
 
             cb({ success: true });
-            sessionService.broadcastUpdate(sessionID, `User (${targetUser.name || `User`}) was removed by the host.`);
+            sessionService.broadcastUpdate(sessionID, `User (${targetName || `User`}) was removed by the host.`);
+            
             sessionService.handleSessionCleanup(sessionID);
         },
 
         // --- host transfers host status ---
         handleTransferHost: async ({ sessionID, newHostUUID }, { user, socket }, cb ) => {
 
+            // protocol/system guards
             if (!user.isHost ) throw new Error(`[TRANSFER HOST] Unauthorized transfer attempt by ${user?.name || socket.id}`);
 
-            const targetUser = activeUsers[newHostUUID];
-            if (!targetUser || targetUser.sessionID !== sessionID) {
-                throw new Error(`[TRANSFER HOST] Transfer failed: target user ${newHostUUID} not found in session.`);
-            }
+            // get target user
+            const targetUser = sessionService.getTargetUser(newHostUUID, sessionID);
+            if (!targetUser) throw new Error(`[TRANSFER HOST] Transfer failed: target user ${newHostUUID} not found in session.`);
 
-            // change host status of both users
+            // change host status of both users on server side
             user.isHost = false;
             targetUser.isHost = true;
 

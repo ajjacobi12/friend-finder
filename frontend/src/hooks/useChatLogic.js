@@ -1,13 +1,13 @@
 // hooks/useChatLogic.js
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Alert, Keyboard } from 'react-native';
+import { Alert, Keyboard, Animated } from 'react-native';
 import * as Crypto from 'expo-crypto';
 
 import { useUser } from '../context/UserContext';
 import { useSessionBackHandler } from './useSessionBackHandler';
 import { sendMessageAction, editMessageAction, deleteMessageAction, typingAction, stopTypingAction } from '../services/socketServices';
 
-export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused }) => {
+export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused, isSidebarVisible, newMsgBelow }) => {
     // ---------------------------------------------------------------------------------------------
     // DATA & CONTEXT
     // ---------------------------------------------------------------------------------------------
@@ -34,11 +34,17 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
     const typingTimeoutRef = useRef(null);
     const isTypingRef = useRef(false);
 
+    const pulseAnim = useRef(new Animated.Value(0)).current; // Start at mid-glow
+    const animationRef = useRef(null);
+
     // ---------------------------------------------------------------------------------------------
     // DERIVED CONSTANTS
     // ---------------------------------------------------------------------------------------------
     const COOLDOWN_MS = 500; // 0.5 seconds between messages
     const currentChatRoomID = isDirectMessage ? DMroomID : sessionID;
+
+    const hasUnreadDMs = unreadRooms.some(id => id.includes('_'));
+    const hasUnreadGroup = unreadRooms.includes(sessionID);
 
     // ---------------------------------------------------------------------------------------------
     // NAVIGATION & SYSTEM HANDLERS
@@ -54,6 +60,33 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
     }, [isDirectMessage, navigation]);
     useSessionBackHandler(onLeaveChat);
 
+    // --- SWIPING BACK ----
+    useEffect(() => {
+        // Get the parent (The Stack Navigator)
+        const parentNav = navigation.getParent();
+        if (!parentNav) return;
+
+        const unsubscribe = parentNav.addListener('beforeRemove', (e) => {
+            console.log("Parent swipe intercepted: Staying in Chat tab");
+
+            // If we're not in a DM, let it go back to the Map
+            if (!isDirectMessage) return;
+
+            // 1. Block the exit to Map
+            e.preventDefault();
+
+            // 2. Just change our local state/params
+            navigation.setParams({
+                isDirectMessage: false,
+                DMroomID: null,
+            });
+
+            console.log("Parent swipe intercepted: Staying in Chat tab");
+        });
+
+        return unsubscribe;
+    }, [navigation, isDirectMessage]);
+
     // ---------------------------------------------------------------------------------------------
     // INTERNAL LOGIC HELPERS (private)
     // ---------------------------------------------------------------------------------------------
@@ -66,8 +99,6 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
             chatRoomID,
             msgID,
             senderUUID: userUUID,
-            senderName: name, 
-            color: selectedColor,
             context: { text },
             timestamp: Date.now(), // Local timestamp for immediate sorting
         };
@@ -309,7 +340,7 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
     // --- SHOW EDIT/DELETE OPTIONS (show the action menu) ---
     const handleMessageLongPress = (item, canEdit) => {
         if (canEdit) {
-            Alert.alert("Message Options", "Choose an action for this message.", [
+            Alert.alert("", "", [
                 { text: "Edit", onPress: () => startEditing(item) },
                 { text: "Delete", style: "destructive", onPress: () => confirmDeletion(item) },
                 { text: "Cancel", style: "cancel" }
@@ -323,9 +354,60 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
     // --- CLEAR UNREAD MESSAGES ---
     // clears when navigating to room with unread messages/in the room as they come in
     useEffect(() => {
-        markAsRead( isFocused ? currentChatRoomID : null);
+        if (isFocused && currentChatRoomID) {
+            markAsRead(currentChatRoomID);
+        }
         return () => markAsRead(null);
-    }, [currentChatRoomID, markAsRead, isFocused]);
+    }, [currentChatRoomID, markAsRead, isFocused, unreadRooms.length]);
+
+    // animated pulsing unread messages button
+    useEffect(() => {
+        let animationActive = true;
+
+        const startAnimation = () => {
+            // if animationRef already exists, the loop is running, do not call setValue(0) or stop the flow
+            if (animationRef.current) return;
+
+            pulseAnim.setValue(0);
+            // define the starting and looping pulses
+            const intro = Animated.timing(pulseAnim, { toValue: 1, duration: 750, useNativeDriver: false });
+            const loop = Animated.loop(
+                Animated.sequence([
+                    Animated.timing(pulseAnim, { toValue: 1, duration: 10, useNativeDriver: false }),
+                    Animated.timing(pulseAnim, { toValue: 0.4, duration: 3000, useNativeDriver: false }),
+                    Animated.timing(pulseAnim, { toValue: 1, duration: 750, useNativeDriver: false }),
+                ])
+            );
+
+            const fullSequence = Animated.sequence([intro, loop]);
+            animationRef.current = fullSequence;
+            fullSequence.start();
+
+        };
+
+        const anyUnreads = hasUnreadDMs || (isDirectMessage && hasUnreadGroup) || newMsgBelow;
+
+        if (anyUnreads && isFocused) {
+            requestAnimationFrame(() =>{
+                if (animationActive) startAnimation();
+            });
+        } else {
+            if (animationRef.current) {
+                animationRef.current.stop();
+                animationRef.current = null;
+            }
+            pulseAnim.setValue(0);
+        }
+
+        return () => {
+            animationActive = false;
+            if (animationRef.current) {
+                animationRef.current.stop();
+                animationRef.current = null;
+            }
+            pulseAnim.setValue(0);
+        };
+    }, [hasUnreadDMs, hasUnreadGroup, isFocused, isSidebarVisible, newMsgBelow]);
 
     // --- TYPING INDICATOR/EDITED & DELETED MESSAGES ---
     // listens for 'user-typing' and 'user-stop-typing' events
@@ -333,21 +415,21 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
     useEffect(() => {
         if (!socket) return;
 
-        const handleTyping = ({ chatRoomID, senderUUID, senderName }) => {
+        const handleTyping = ({ chatRoomID, userUUID }) => {
             try {
                 if (chatRoomID === currentChatRoomID) {
-                    setTypingUsers(prev => ({ ...prev, [senderUUID]: desanitize(senderName) }));
+                    setTypingUsers(prev => ({ ...prev, [userUUID]: true }));
                 }
             } catch (err) {
                 console.error("Typing handler error: ", err.message);
             }
         };
 
-        const handleStopTyping = ({ senderUUID }) => {
+        const handleStopTyping = ({ userUUID }) => {
             try {
                 setTypingUsers(prev => {
                     const newState = { ...prev };
-                    delete newState[senderUUID]; // remove user from "typing" list
+                    delete newState[userUUID]; // remove user from "typing" list
                     return newState;
                 });
             } catch (err) {
@@ -389,6 +471,7 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
         };
     }, [socket, currentChatRoomID]);
 
+
     // ---------------------------------------------------------------------------------------------
     // PUBLIC API
     // ---------------------------------------------------------------------------------------------   
@@ -404,6 +487,8 @@ export const useChatLogic = ({ isDirectMessage, DMroomID, navigation, isFocused 
         handleMessageLongPress,
         sessionID, userUUID,
         unreadRooms,
-        currentChatRoomID
+        currentChatRoomID,
+        pulseAnim, 
+        hasUnreadDMs, hasUnreadGroup
     };
 };

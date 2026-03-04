@@ -1,47 +1,22 @@
-// disconnectHandler.js
+// backend/handlers/disconnectHandler.js
+// currently designed so that user stays in session indefinitely until they voluntarily leave or are kicked
 
-module.exports = (socketToUUID, activeUsers, sessionService) => {
-    return {
-        handleOnDisconnect: (socket) => { 
-            const { user, userUUID, sessionID } = socket;
+module.exports = {
+    handleOnDisconnect: (socket) => { 
+        const { user, sessionID } = socket;
 
-            // system/protocol guards
-            if (!user || !userUUID || !sessionID) return;
+        // system/protocol guards
+        if (!user || !sessionID) return;
 
-            const userName = user.name || "Unknown User";
+        // update memoory objects
+        user.status = 'offline';
+        user.lastSeen = Date.now();
 
-            console.log(`[BLINK] User ${userName} disconnected. Waiting for grace period...`);
+        console.info(`[OFFLINE] ${user.name} (Festival Mode). Staying in memory.`);
+        // console.info(`[BLINK] User ${user.name} disconnected. Waiting for grace period...`);
 
-            // immediate UI cleanup, stop anytyping indicaters
-            socket.to(sessionID).emit('user-stop-typing', { senderUUID: userUUID });
-            
-            // remove old socket mapping since upon reconnection they will be give a new socket.id
-            delete socketToUUID[socket.id];
-
-            // start grace period of 15 seconds
-            setTimeout(() => {
-                // get most current version of user
-                const currentUser = activeUsers[userUUID];
-                // check if user is still associated with the disconnected socket
-                // if they reconnect, activeUsers[userUUID].socketID will be different
-                if (currentUser && currentUser.socketID === socket.id)  {
-                    console.log(`[EXIT] Grace period expired for ${userName}. Cleaning up.`);
-
-                    // leave logic
-                    if (currentUser.isHost === true) sessionService.ensureHostExists(sessionID, userUUID);
-
-                    // clean memory
-                    delete activeUsers[userUUID];
-
-                    // broadcast and session check
-                    sessionService.handleSessionCleanup(sessionID);
-                    sessionService.broadcastUpdate(sessionID, `User ${userName} left.`);
-                } else {
-                    // if user reconnects in time, socket.id should be changed
-                    console.log(`[RECOVERY] User ${userName} reconnected within grace period.`);
-                }
-            }, 15000);
-        }
-
-    };
+        // immediate UI cleanup, stop anytyping indicaters, mark connection status as offline on frontend
+        socket.to(sessionID).emit('user-stop-typing', { senderUUID: user.uuid });
+        socket.to(sessionID).emit('user-status-change', { userUUID: user.uuid, status: 'offline' });
+    }
 };
