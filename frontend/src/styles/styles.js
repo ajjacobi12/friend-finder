@@ -1,3 +1,4 @@
+// frontend/src/styles/styles.js
 import { StyleSheet } from 'react-native';
 
 // Visuals: this is the "CSS" for mobile app, handles presentation while HTML handles structure
@@ -140,11 +141,12 @@ export const styles = StyleSheet.create({
     // Danger Variant (Pressed)
     headerButtonDangerPressed: {
         backgroundColor: '#ff3b3015',
-        borderColor: '#ff3b30',
+        borderColor: '#ff3b3015',
         shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.2,
         shadowRadius: 2,
         elevation: 2,
+        borderWidth: 1,
     },
     headerButtonText: {
         color: 'black',

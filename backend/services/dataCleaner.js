@@ -30,7 +30,7 @@ const SessionIDSchema = z.string()
 // User Profile: name: 1-15 characters, hex color, and privacy settings
 const UserProfileSchema = z.object({
     name: z.string().min(1).max(15).transform(sanitizeStrict),
-    color: z.string().regex(/^#[0-9A-F]{6}$/i).default('#cccccc'),
+    color: z.string().regex(/^#[0-9A-F]{6}$/i),
     // isGhost: z.boolean().optional().default(false),
     // fineLocation: z.boolean().optional().default(true),
 });

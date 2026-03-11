@@ -1,0 +1,17 @@
+// frontend/src/features/useSessionBackHandler.js
+import { useCallback } from 'react';
+import { BackHandler } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+
+export function useSessionBackHandler(onLeaveAction) {
+    useFocusEffect(
+        useCallback(() => {
+            const onBackPress = () => {
+                return onLeaveAction();
+            };
+
+            const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+            return () => subscription.remove();
+        }, [onLeaveAction])
+    );
+}

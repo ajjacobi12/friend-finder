@@ -10,7 +10,7 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID, maxSessionCapac
         let isUnique = false;
         while (!isUnique) {
             sessionID = Math.random().toString(36).substring(2,8).toUpperCase().padEnd(6,0);
-            if (!activeSessions[sessionID]) isUnique = true;
+            if (!core.getSession[sessionID]) isUnique = true;
         }
         return sessionID;
     };
@@ -86,10 +86,9 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID, maxSessionCapac
             // --- RECONNECTION ---
             const isReconnecting = !!activeUsers[userUUID];
             if (isReconnecting) {
-                // if a reconnection, update the new socket line
+                // if a reconnection, update the new socket line, keep all old information
                 activeUsers[userUUID].socketID = socket.id;
                 activeUsers[userUUID].sessionID = sessionID;
-                activeUsers[userUUID].isHost = !hasHost;
                 activeUsers[userUUID].lastSeen = Date.now();
                 activeUsers[userUUID].status = 'online';
             } else {
@@ -97,8 +96,8 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID, maxSessionCapac
                 activeUsers[userUUID] = {
                     uuid: userUUID,
                     socketID: socket.id,
-                    name: profile?.name || "New User",
-                    color: profile?.color || "#cccccc",
+                    name: profile?.name || null,
+                    color: profile?.color || null,
                     sessionID: sessionID,
                     // if no host exists, this person is the host
                     isHost: !hasHost,
@@ -114,7 +113,7 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID, maxSessionCapac
             // update frontend on host status if needed
             socket.join(sessionID);
             socket.join(userUUID);
-            activeSessions[sessionID] = true;
+            activeSessions[sessionID] = core.getSession(sessionID) || { hostUUID: activeUsers[userUUID].isHost ? userUUID : null };
 
             const user = activeUsers[userUUID];
             core.broadcastUpdate(sessionID, isReconnecting ? `User ${user.name} reconnected.` : `User ${user.name} joined.`);

@@ -106,6 +106,11 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID) => {
         return activeUsers[uuid] || null;
     };
 
+    // returns session information
+    const getSession = (sessionID) => {
+        return activeSessions[sessionID] || null;
+    };
+
     // ------------------------------------------ PUBLIC API ------------------------------------------
     return{
         broadcastUpdate,
@@ -113,6 +118,7 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID) => {
         cancelSessionDeletion,
         handleSessionCleanup,
         getMasterUser,
+        getSession,
 
         // -------------------------------------- PROFILE HELPERS --------------------------------------
         updateUser: (user, data) => {

@@ -130,15 +130,18 @@ function AppNavigator() {
 
 export default function App() { 
   return (
+    // wrapping in these allows for global access of user data
     <SafeAreaProvider>
       <KeyboardProvider>
         <UserProvider> 
-            {/* wrapping in this to allow global access of user data */}
+          <NotificationProvider>
 
+            {/* wrapping in this allows navigator to manage which screen is currently visible */}
             <NavigationContainer ref={navigationRef} theme={myTheme}>
-            {/* wrapping in this to allow navigator to manage which screen is currently visible */}
                 <AppNavigator/>
             </NavigationContainer>
+
+          </NotificationProvider>
         </UserProvider>
       </KeyboardProvider>
     </SafeAreaProvider>

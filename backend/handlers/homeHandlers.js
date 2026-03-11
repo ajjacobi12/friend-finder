@@ -81,17 +81,33 @@ module.exports = (io, sessionService) => {
 
         // --- host transfers host status ---
         handleTransferHost: async ({ sessionID, newHostUUID }, { user, socket }, cb ) => {
-
             // protocol/system guards
-            if (!user.isHost ) throw new Error(`[TRANSFER HOST] Unauthorized transfer attempt by ${user?.name || socket.id}`);
-
-            // get target user
+            const masterUser = sessionService.getMasterUser(user.uuid);
             const targetUser = sessionService.getTargetUser(newHostUUID, sessionID);
-            if (!targetUser) throw new Error(`[TRANSFER HOST] Transfer failed: target user ${newHostUUID} not found in session.`);
+            const session = sessionService.getSession(sessionID);
 
-            // change host status of both users on server side
-            user.isHost = false;
+            if (!session) throw new Error('[TRANSFER HOST] Unable to retrieve session information.');
+            if (!masterUser) throw new Error('[TRANSFER HOST] Unable to retrieve user information.');
+            if (!targetUser) throw new Error(`[TRANSFER HOST] Transfer failed: unable to retrieve target user ${newHostUUID} information.`);
+            if (!masterUser.isHost ) throw new Error(`[TRANSFER HOST] Unauthorized transfer attempt by ${masterUser?.name || socket.id}`);
+
+            // get target user's socket
+            const targetSocket = io.sockets.sockets.get(targetUser.socketID);
+            if (!targetSocket) console.log(`[TRANSFER HOST] target user ${newHostUUID} socket not found in session. User is offline.`);
+
+            // update session pointer
+            session.hostUUID = newHostUUID;
+
+            // update master memory
+            masterUser.isHost = false;
             targetUser.isHost = true;
+            
+            // refresh socket's badge
+            // always update the user transfering, update target user if they are online
+            socket.user = masterUser;
+            if (targetSocket) {
+                targetSocket.user = targetUser; 
+            }
 
             io.to(sessionID).emit('host-change', newHostUUID);
             cb({ success: true });

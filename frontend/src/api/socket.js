@@ -1,4 +1,4 @@
-// frontend/api/socket
+// frontend/src/api/socket
 // "antenna" of project, creates a single, reliable bridge between phone
 //  and computer that stays open while navigating betweenscreens
 
