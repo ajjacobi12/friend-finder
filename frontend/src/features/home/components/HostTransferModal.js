@@ -1,5 +1,4 @@
 // frontend/src/features/home/components/HostTransferModal.js
-import React from 'react';
 import { View, Text, Modal, Pressable, FlatList, StyleSheet } from 'react-native';
 import HomeUserItem from './HomeUserItem';
 
@@ -17,7 +16,7 @@ const HostTransferModal = ({ visible, onClose, friends, onTransfer }) => {
                     </View>
 
                     <Text style={styles.subtitle}>
-                        You must appoint a new host before leaving the session.
+                        Please choose a new host before leaving.
                     </Text>
 
                     <FlatList

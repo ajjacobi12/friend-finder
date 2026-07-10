@@ -8,7 +8,7 @@ import { styles } from '../../styles/styles';
 import { useProfileLogic } from './useProfileLogic';
 import ColorPicker from './components/ColorOptions';
 
-import { PROFILE_COLOR_OPTIONS } from '../../constants/profileColorOptions';
+import { PROFILE_COLOR_OPTIONS } from '../../constants';
 
 // ---- main UI ----
 export default function ProfileScreen({ navigation }) {

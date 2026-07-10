@@ -29,7 +29,6 @@ export const useLoginLogic = ({ isJoinScreen, hideJoinInput }) => {
             return false;
         }
 
-        console.log("loading:", isLoading);
         if (isLoading) return false;
 
         // sets initial states
@@ -48,7 +47,7 @@ export const useLoginLogic = ({ isJoinScreen, hideJoinInput }) => {
 
     // ------ START NEW SESSION --------
     const createNewSession = async () => {
-        console.log("starting create request");
+        // console.log("starting create request");
         if (!startRequest('creating', true)) return;
 
         const savedIdentity = identityStorage.load(KEYS.IDENTITY);
@@ -62,7 +61,6 @@ export const useLoginLogic = ({ isJoinScreen, hideJoinInput }) => {
             // console.log("Attempting to create session");
             const response = await createSessionAction(uuid, profile);
             // check if android user hit back while server was processing
-            // console.log("Active request status: ", activeRequest.current);
             if (activeRequest.current !== 'creating') return;
             finalizeSession(response, true, 'CREATE');
         } catch (err) {
@@ -96,7 +94,8 @@ export const useLoginLogic = ({ isJoinScreen, hideJoinInput }) => {
             finalizeSession(response, true, 'JOIN');
         } catch (err) {
             // handles technical errors and the logic ones thrown above
-            setErrorMsg(err.message);
+            if (err.message.includes("malformed sessionID") || err.message.includes("does not exist")) setErrorMsg("Invalid sessionID");
+            else setErrorMsg(err.message);
             setTimeout(() => setErrorMsg(""), 5000);
         } finally {
             cleanup();

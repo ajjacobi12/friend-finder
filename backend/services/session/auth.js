@@ -2,7 +2,7 @@
 // handles logic of getting into system
 const crypto = require('crypto');
 
-module.exports = (io, activeUsers, activeSessions, socketToUUID, maxSessionCapacity, core) => {
+module.exports = (io, activeUsers, activeSessions, socketToUUID, MAX_SESSION_CAPACITY, core) => {
     // -------------------------------------- LOGIN HELPERS --------------------------------------
     // generates sessionID
     const generateUniqueCode = () => {
@@ -19,7 +19,7 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID, maxSessionCapac
     const checkSessionCapacity = (sessionID, existingUUID, cb) => {
         const usersInSession = Object.values(activeUsers).filter(u => u.sessionID === sessionID);          
         const isReturningUser = !!(existingUUID && activeUsers[existingUUID] && activeUsers[existingUUID].sessionID === sessionID);
-        if(usersInSession.length >= maxSessionCapacity && !isReturningUser) {
+        if(usersInSession.length >= MAX_SESSION_CAPACITY && !isReturningUser) {
             cb({ success: false, error: "Session is full." });
             return true;
         } else {
@@ -116,9 +116,11 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID, maxSessionCapac
             activeSessions[sessionID] = core.getSession(sessionID) || { hostUUID: activeUsers[userUUID].isHost ? userUUID : null };
 
             const user = activeUsers[userUUID];
-            core.broadcastUpdate(sessionID, isReconnecting ? `User ${user.name} reconnected.` : `User ${user.name} joined.`);
+            core.broadcastUpdate(sessionID, isReconnecting ? `[handleUserJoining] User ${user.name} reconnected.` : `[handleUserJoining] User ${user.name || user.uuid} joined.`);
 
-            if (user.isHost) io.to(sessionID).emit('host-change', userUUID);
+            if (user.isHost && !isReconnecting) {
+                io.to(sessionID).emit('host-change', userUUID);
+            }
 
             // --- THE MANUAL STAMP (for middleware) ---
             socket.user = user;

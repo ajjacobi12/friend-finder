@@ -28,7 +28,6 @@ export const useSessionLifecycle = (config) => {
             };
         }
 
-        // reset the states
         setSessionID(null);
         setSessionUsers([]);
         setIsHost(false);
@@ -36,7 +35,6 @@ export const useSessionLifecycle = (config) => {
         setIsReconnecting(false);
         setIsLoading(false);
 
-        // reset the refs
         stateRef.current = {
             ...stateRef.current,
             sessionID: null,
@@ -46,8 +44,7 @@ export const useSessionLifecycle = (config) => {
             isLoading: false,
         };
 
-        // remove socket "identity badges"
-        socket.auth = { userUUID: null, sessionID: null };
+        socket.auth = { userUUID: stateRef.current.userUUID, sessionID: null };
     }, []);
 
     // handles a successful create/join
@@ -91,10 +88,10 @@ export const useSessionLifecycle = (config) => {
                 }
             } else {
                 const errorMessage = response.error || "An unknown error occurred.";
-                Alert.alert(`[${actionName}] Failed:`, errorMessage);
+                Alert.alert(`Failed:`, errorMessage);
 
                 console.log(`[${actionName}] Unsuccessful joinSessionAction response. Error:`, response.error);
-                handleCleanExit(true);
+                handleCleanExit();
             }
             return true;
         } catch (err) {
@@ -106,41 +103,46 @@ export const useSessionLifecycle = (config) => {
     useEffect(() => {
         const reboot = async () => {
             try {
-                const savedIdentity = await identityStorage.load(KEYS.IDENTITY);
+                const [savedIdentity, savedPrefs] = await Promise.all([
+                    identityStorage.load(KEYS.IDENTITY),
+                    identityStorage.load(KEYS.PREFS)
+                ]);
 
-                // if no saved preferences upon app reboot, stop reboot
                 if(!savedIdentity?.userUUID || !savedIdentity?.sessionID) {
                     console.log("[REBOOT] Unsuccessful. No saved userUUID or sessionID");
+                    setIsRebooting(false);
+                    stateRef.current.isRebooting = false;
                     return;
                 }
 
                 console.log(`[REBOOT] Found existing session: ${savedIdentity.sessionID}, for user: ${savedIdentity.userUUID}`);
 
-                // restore the state, refs, and socket auth
                 await setAllThingsIdentity(savedIdentity.userUUID, savedIdentity.sessionID);
+                if (savedPrefs?.name && savedPrefs?.color) {
+                    // console.log("Preferences found. Name:", savedPrefs.name, " Color:", savedPrefs.color);
+                    await setAllThingsPrefs(savedPrefs.name, savedPrefs.color);
+                }
                 
                 // reboot logic
                 try {
                     const response = await joinSessionAction(
                         savedIdentity.sessionID, 
-                        savedIdentity.userUUID
+                        savedIdentity.userUUID,
+                        {name: (savedPrefs?.name || "Returning User"), color: (savedPrefs?.color || '#cccccc')}
                     );
                     await finalizeSession(response, true, 'REBOOT');
+                    console.log("[REBOOT] successful reboot for UUID", savedIdentity.userUUID);
                 } catch (err) {
+                    console.log("[REBOOT] Rejoin error:", err.message);
                     // if server is unreachable, stay in 'reconnecting'
                     // if logic error (404), wipe it
-                    if (err.message.includes("exist")) await handleCleanExit(true);
+                    if (err.message.includes("exist")) await handleCleanExit();
                 }
             } catch (err) {
-                console.error("[REBOOT] failed: ", err);
+                console.error("[REBOOT] failed:", err);
             } finally {
-                // ensures that if user remains in app and loses connection, logic follows silent rejoin
-                // in onConnect. isRebooting is only set to true when the app is (re)booted
                 setIsRebooting(false);
-                stateRef.current = {
-                    ...stateRef.current,
-                    isRebooting: false
-                };
+                stateRef.current.isRebooting = false;
             }
         };  
         reboot();

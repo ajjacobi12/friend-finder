@@ -1,21 +1,21 @@
 // frontend/src/core/session/notificationService.js
 
-import { EventEmitter } from 'react-native';
+import { EventEmitter } from 'expo-modules-core';
 
 const eventEmitter = new EventEmitter();
 
 export const subscribeToNotifications = (callback) => {
-    eventEmitter.addListener('new-message', callback);
-    eventEmitter.addListener('user-joined', callback);
-    eventEmitter.addListener('user-left', callback);
-    eventEmitter.addListener('you-are-host', callback);
+    const subscription1 = eventEmitter.addListener('new-message', callback);
+    const subscription2 = eventEmitter.addListener('user-joined', callback);
+    const subscription3 = eventEmitter.addListener('user-left', callback);
+    const subscription4 = eventEmitter.addListener('you-are-host', callback);
 
     return () => {
-        eventEmitter.removeListener('new-message', callback);
-        eventEmitter.removeListener('user-joined', callback);
-        eventEmitter.removeListener('user-left', callback);
-        eventEmitter.removeListener('you-are-host', callback);
-    }
+        subscription1.remove();
+        subscription2.remove();
+        subscription3.remove();
+        subscription4.remove();
+    };
 };
 
 export const emitMsg = (data) => {

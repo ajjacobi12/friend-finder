@@ -110,7 +110,6 @@ export const useProfileLogic = ({ navigation, colorOptions }) => {
 
     // --- BACK BUTTON TO LOGIN ---
     const handleBack = () => {
-        performLeaveCleanup();
         navigation.goBack();
     };
 
@@ -135,10 +134,11 @@ export const useProfileLogic = ({ navigation, colorOptions }) => {
             // CASE 2: user has not registered, redirect them to login and cleanup
             e.preventDefault();
             performLeaveCleanup();
+            navigation.dispatch(e.data.action);
         });
 
         return unsubscribe;
-    }, [navigation, hasRegistered, sessionID]);
+    }, [navigation, hasRegistered, performLeaveCleanup]);
 
     // --- REMEMBER PREVIOUS NAME ENTERED ----
     useEffect(() => {
@@ -155,8 +155,8 @@ export const useProfileLogic = ({ navigation, colorOptions }) => {
     useEffect(() => {
         // console.log("selected color: ", color);
         if (!hasRegistered) {
-            const availColor = getFirstAvailableColor(color, friends, colorOptions);
-            if (availColor && available !== color) setColor(availColor);
+            const available = getFirstAvailableColor(color, friends, colorOptions);
+            if (available && available !== color) setColor(available);
         }
     }, [friends, hasRegistered, color, colorOptions, getFirstAvailableColor]);
     

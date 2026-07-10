@@ -1,7 +1,6 @@
 // backend/services/session/core.js
 // functions required by everyone, don't depend on others, just provide tools
 
-// tracking "deletion tickets" to stop countdown before server deletion
 const sessionTimeoutRefs = {};
 
 module.exports = (io, activeUsers, activeSessions, socketToUUID) => {
@@ -101,10 +100,6 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID) => {
     };
 
     // -------------------------------------- PROFILE HELPERS --------------------------------------
-    // returns user info
-    const getMasterUser = (uuid) => {
-        return activeUsers[uuid] || null;
-    };
 
     // returns session information
     const getSession = (sessionID) => {
@@ -117,7 +112,6 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID) => {
         purgeUser,
         cancelSessionDeletion,
         handleSessionCleanup,
-        getMasterUser,
         getSession,
 
         // -------------------------------------- PROFILE HELPERS --------------------------------------
@@ -131,11 +125,12 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID) => {
         },
 
         // -------------------------------------- HOME HELPERS --------------------------------------
-        getTargetUser: (targetUUID, sessionID) => {
-            const target = activeUsers[targetUUID];
+        getUser: (uuid, sessionID = null) => {
+            const user = activeUsers[uuid];
             // return null if user doesn't exist or are in a different session
-            if (!target || target.sessionID !== sessionID) return null;
-            return target;
+            if (!user) return null;
+            if (sessionID && user.sessionID !== sessionID) return null;
+            return {...user};
         },
 
         // ensure session always has a host (host leaves without selecting new host or disconnect)
@@ -144,10 +139,42 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID) => {
                 u => u.sessionID === sessionID && u.uuid !== leavingUUID
             );
             if (remainingUsers.length > 0) {
-                const newHost = remainingUsers[0];
-                newHost.isHost = true;
-                io.to(sessionID).emit('host-change', newHost.uuid);
-                broadcastUpdate(sessionID, `[HOST CHANGE] New host is ${newHost.uuid}`);
+                const newHostUUID = remainingUsers[0].uuid;
+                // activeUsers[newHostUUID].isHost = true;
+                // activeSessions[sessionID].hostUUID = newHostUUID;
+
+                // activeUsers[leavingUUID].isHost = false;
+
+                // io.to(sessionID).emit('host-change', newHostUUID);
+                // broadcastUpdate(sessionID, `[HOST CHANGE] New host is ${newHostUUID}`);
+
+                const leavingUser = activeUsers[leavingUUID];
+                const targetUser = activeUsers[newHostUUID];
+                const session = activeSessions[sessionID];
+
+                if (!session) throw new Error('[ENSURE HOST EXISTS] Unable to retrieve session information.');
+                if (!leavingUser) throw new Error('[ENSURE HOST EXISTS] Unable to retrieve user information.');
+                if (!targetUser) throw new Error(`[ENSURE HOST EXISTS] Transfer failed: unable to retrieve target user ${newHostUUID} information.`);
+                if (!leavingUser.isHost ) throw new Error(`[ENSURE HOST EXISTS] Unauthorized transfer attempt by ${leavingUser?.name || socket.id}`);
+
+                const leavingSocket = io.sockets.sockets.get(leavingUser.socketID);
+                const targetSocket = io.sockets.sockets.get(targetUser.socketID);
+                if (!targetSocket) console.log(`[ENSURE HOST EXISTS] target user ${newHostUUID} socket not found in session. User is offline.`);
+
+                session.hostUUID = newHostUUID;
+
+                leavingUser.isHost = false;
+                targetUser.isHost = true;
+                
+                leavingSocket.user = leavingUser;
+                if (targetSocket) {
+                    targetSocket.user = targetUser; 
+                }
+
+                io.to(sessionID).emit('host-change', newHostUUID);
+                broadcastUpdate(sessionID, `[HOST CHANGE (ensureHostExists)] New host is ${newHostUUID}`);
+
+
                 return true;
             }
             return false;

@@ -9,12 +9,12 @@ import { useIsFocused } from '@react-navigation/native';
 import { useUser } from '../../context/UserContext';
 
 import { useChatLogic } from './useChatLogic';
-import MessageItem from './components/chat/MessageItem';
-import Sidebar from './components/chat/SidebarItem';
+import MessageItem from './components/MessageItem';
+import Sidebar from './components/SidebarItem';
 
 import { styles } from '../../styles/styles';
 
-const editTimeLimit = 5 * 60 * 1000; // 5 minutes
+import { MAX_MSG_LENGTH, EDIT_TIME_LIMIT } from '../../constants';
 
 export default function ChatScreen({ navigation, route }) {
     const { friends } = useUser();
@@ -27,10 +27,9 @@ export default function ChatScreen({ navigation, route }) {
     const [newMsgBelow, setNewMsgBelow] = useState(false);
     
     const { isDM, DMroomID, recipientName = 'User' } = route.params || {};
-    const maxMsgLength = 500;
 
     const {
-        textInput, activeRoomMsgs,
+        inputText, activeRoomMsgs,
         editingMsg, 
         sendMsg, resendMsg,
         typingUsers, spamWarning,
@@ -47,8 +46,7 @@ export default function ChatScreen({ navigation, route }) {
     const isAutoScrollingRef = useRef(false);
 
     // Map the UUIDs to Names
-    const typingNames = Object.keys(typingUsers)
-        .map(uuid => {
+    const typingNames = Object.keys(typingUsers).map(uuid => {
             const friend = friends.find(f => f.uuid === uuid);
             return friend ? friend.name : 'Someone';
         });
@@ -71,9 +69,9 @@ export default function ChatScreen({ navigation, route }) {
             userUUID={userUUID}
             onLongPress={handleMsgLongPress}
             onResend={resendMsg}
-            editTimeLimit={editTimeLimit}
+            editTimeLimit={EDIT_TIME_LIMIT}
          />
-    ), [userUUID, handleMsgLongPress, resendMsg, editTimeLimit]);
+    ), [userUUID, handleMsgLongPress, resendMsg, EDIT_TIME_LIMIT]);
 
     // --- EFFECTS & LISTENERS ---
 
@@ -131,7 +129,7 @@ export default function ChatScreen({ navigation, route }) {
                                     paddingHorizontal: 10,
                                     paddingTop: 2,
                                     backgroundColor: pressed ? 'rgba(74, 74, 74, 0.1)' : '#ffffff',
-                                    borderWidth: pressed ? 1 : (hasUnreadGroup ? 0 : 3),
+                                    borderWidth: pressed ? 1 : (hasUnreadGroup ? 0 : 2),
                                     borderColor: hasUnreadGroup ? 'rgba(135, 206, 250, 0.8)' : 'rgba(83, 82, 82, 0.1)', 
                                 }
                             ]}
@@ -179,7 +177,7 @@ export default function ChatScreen({ navigation, route }) {
                             styles.headerButtonStandard,
                             {
                                 backgroundColor: pressed ? 'rgba(74, 74, 74, 0.1)' : '#ffffff',
-                                borderWidth: pressed ? 1 : (hasUnreadDMs ? 0 : 3),
+                                borderWidth: pressed ? 1 : (hasUnreadDMs ? 0 : 2),
                                 paddingHorizontal: 5,
                                 minWidth: 40,
                                 paddingRight: 0,
@@ -301,7 +299,7 @@ export default function ChatScreen({ navigation, route }) {
                 {/* --- INPUT CONTAINER --- */}
                 <View style={[
                         styles.messageInputContainer, 
-                        { flexDirection: 'column', alignItems: 'stretch', paddingBottom: 7 }
+                        { flexDirection: 'column', alignItems: 'stretch', paddingBottom: 10 }
                     ]}
                 >
                     {/* top row: buttons and text input */}
@@ -323,12 +321,12 @@ export default function ChatScreen({ navigation, route }) {
                                 { minHeight: 37, maxHeight: 111 }
                             ]}
                             placeholder={editingMsg ? "Edit your message..." : "Type a message..."}
-                            value={textInput}
+                            value={inputText}
                             onChangeText={handleTextChange}
                             onSubmitEditing={() => editingMsg ? saveEdit() : sendMsg()}
                             returnKeyType="send"
                             placeholderTextColor="#838181"
-                            maxLength={maxMsgLength}
+                            maxLength={MAX_MSG_LENGTH}
                             blurOnSubmit={false}
                             multiline={true}
                             textAlignVertical="center" // for android
@@ -340,7 +338,7 @@ export default function ChatScreen({ navigation, route }) {
                                 styles.sendButton,
                                 editingMsg && { backgroundColor: '#34C759' }
                             ]}
-                            disabled={textInput.trim().length === 0}
+                            disabled={inputText.trim().length === 0}
                         >
                             <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 18 }}>
                                 {editingMsg ? "Save" : "Send"}
@@ -350,15 +348,15 @@ export default function ChatScreen({ navigation, route }) {
                     
                     {/* bottom row: character counter */}
                     {/* REMAINING CHARACTER COUNT */}
-                    {textInput.length > 400 && (
+                    {inputText.length > 400 && (
                         <Text style={{
                             alignSelf: 'flex-end',
                             marginRight: 15,
                             marginTop: 4,
                             fontSize: 10,
-                            color: textInput.length >= maxMsgLength ? '#ff3b30' : '#888'
+                            color: inputText.length >= MAX_MSG_LENGTH ? '#ff3b30' : '#888'
                         }}>
-                            {maxMsgLength - textInput.length} characters remaining
+                            {MAX_MSG_LENGTH - inputText.length} characters remaining
                         </Text>
                     )}
 

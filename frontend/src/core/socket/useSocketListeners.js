@@ -1,11 +1,11 @@
 // frontend/src/core/socket/useSocketListeners.js
 import React, { useEffect, useRef, useMemo } from 'react';
 import { Alert } from 'react-native';
+import { useAudioPlayer } from 'expo-audio';
 
 import { socketListenersHelpers } from './socketListenersHelpers';
 import { joinSessionAction } from './socketServices';
 
-import { identityStorage, KEYS } from '../identity/identityStorage';
 import { desanitize, formatMsgData } from '../chat/chatUtils';
 
 import socket from '../../api/socket';
@@ -39,11 +39,11 @@ export const useSocketListeners = (config) => {
 
         // --- CONNECTION HANDLER ---
         const onConnect = async () => {
-            const { isRebooting, userUUID, sessionID } = stateRef.current;
+            const { isRebooting, userUUID, sessionID, name, color } = stateRef.current;
 
             resetConnectionUI();
 
-            // don't do this if user is rebooting the app, only for brief drops & reconnections in service
+            // don't do this if user is rebooting/starting up the app, only for brief drops & reconnections in service
             if (isRebooting) {
                 console.log("Reboot logic is happening, stopping onConnect logic.");
                 return;
@@ -61,7 +61,8 @@ export const useSocketListeners = (config) => {
             try {
                 const response = await joinSessionAction(
                     sessionID, 
-                    userUUID
+                    userUUID,
+                    {name, color}
                 );
                 await finalizeSession(response, false, 'CONNNECT/REJOIN')
             } catch (err) {
@@ -70,7 +71,7 @@ export const useSocketListeners = (config) => {
                 const errorMsg = err.message.toLowerCase();
                 if (errorMsg.includes("not found") || errorMsg.includes("exist") || errorMsg.includes("expired")) {
                     console.log("[SILENT REJOIN] unsuccessful: ", err.message);
-                    handleCleanExit(true);
+                    handleCleanExit();
                 }
             } finally {
                 setIsLoading(false);
@@ -78,29 +79,29 @@ export const useSocketListeners = (config) => {
         };
 
         const onDisconnect = (reason) => {
-            const { sessionID, isReconnecting, isConnected } = stateRef.current;
+            const { sessionID } = stateRef.current;
 
             try {
-                console.log("Disconnected:", reason);
+                console.log("[DISCONNECT] Disconnected:", reason);
                 setIsConnected(false);
 
                 // if clean disconnect (server kicked us or we left), don't show overlay
                 if (reason === "io server disconnect" || reason === "io client disconnect") {
-                    console.log("Permanent disconnect detected. Cleaning up.");
+                    console.log("[DISCONNECT] Permanent disconnect detected. Cleaning up.");
                     handleCleanExit();
                     return;
                 }
                 // if accidental drop,
                 // const isAccidental = reason == "transport close" || reason === "ping timeout";
                 if (sessionID) {
-                    console.log("Temporary drop. Keeping session alive for reconnection.");
+                    console.log("[DISCONNECT] Temporary drop. Keeping session alive for reconnection.");
                     
                     // upon disconnection immediately imploy a clear overlay to prevent user from clicking anything
                     // after 1.5s show a loading symbol
-                    showDisconnectionOverlay(isReconnecting, isConnected);
+                    showDisconnectionOverlay();
                 } 
             } catch (err) {
-                console.log("[DISCONNECTION] error:", err.message);
+                console.log("[DISCONNECT] error:", err.message);
             }
         };
 
@@ -132,14 +133,14 @@ export const useSocketListeners = (config) => {
         // message appears immediately on sender's screen, then updates when the server confirms it
         const onReceiveMsg = (inboundData) => {
             const { chatRoomID, msgID } = inboundData;
-            const { sessionUsers, activeRoom } = stateRef.current;
+            const { activeRoom } = stateRef.current;
 
             try {
                 // format message data, get name of sender
                 const msgData = formatMsgData(inboundData, 'sent');
 
                 const senderUUID = msgData.senderUUID;
-                const name = getSenderName(sessionUsers, senderUUID);
+                const name = getSenderName(senderUUID);
                 
                 // save message to local storage
                 saveMsg(chatRoomID, msgID, msgData);
@@ -164,10 +165,8 @@ export const useSocketListeners = (config) => {
         };
 
         const handleDeletedByOthers = ({ chatRoomID, msgID, senderUUID }) => {  
-            const { sessionUsers } = stateRef.current;
-
             try {
-                const name = getSenderName(sessionUsers, senderUUID);
+                const name = getSenderName(senderUUID);
                 // update local storage of deleted message
                 // replace old text with "... removed this message", but keep a record that it once existed
                 updateLocalMsg(chatRoomID, msgID, {
@@ -201,10 +200,9 @@ export const useSocketListeners = (config) => {
         };
 
         const onHostChange = (newHostUUID) => {
-            const { userUUID, isHost } = stateRef.current;
             try {
                 // sets locally stored host status and sends notification
-                handleHostChange(userUUID, newHostUUID, isHost);
+                handleHostChange(newHostUUID);
             } catch (err) {
                 console.log("[HOST CHANGE] error:", err.message);
             }
@@ -247,6 +245,6 @@ export const useSocketListeners = (config) => {
             socket.off('host-change', onHostChange);
             socket.off('user-status-change', onStatusChange);
         };
-    }, [socket, handleCleanExit]); 
+    }, [socket]); 
 
 };

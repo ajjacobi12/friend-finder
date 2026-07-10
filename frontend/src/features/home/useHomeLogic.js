@@ -1,5 +1,5 @@
 // frontend/src/features/home/useHomeLogic.js
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Alert } from 'react-native';
 
 import { useUser } from '../../context/UserContext';
@@ -8,7 +8,7 @@ import { useSessionBackHandler } from '../useSessionBackHandler';
 import { removeUserAction, transferHostAction, endSessionAction, leaveSessionAction } from '../../core/socket/socketServices';
 
 export const useHomeLogic = () => {
-    const { sessionID, isHost, friends, handleCleanExit } = useUser();
+    const { sessionID, isHost, friends, handleCleanExit, stateRef } = useUser();
     
     const [showTransfer, setShowTransfer] = useState(false);
 

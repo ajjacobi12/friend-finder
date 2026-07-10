@@ -8,7 +8,7 @@ import { useLoginLogic } from './useLoginLogic';
 
 import { styles } from '../../styles/styles';
 import { useUser } from '../../context/UserContext';
-import { identityStorage, KEYS } from '../../core/identity';
+import { identityStorage, KEYS } from '../../core/identity/identityStorage';
 
 const { width } = Dimensions.get('window');
 
@@ -18,7 +18,7 @@ export default function LoginScreen( { navigation }) {
     const {
         tempCode, setTempCode,
         errorMsg, setErrorMsg,
-        loading, createNewSession, joinSession
+        isLoading, createNewSession, joinSession
     } = useLoginLogic({ navigation, isJoinScreen, hideJoinInput });
     const { handleCleanExit } = useUser();
         
@@ -91,20 +91,7 @@ export default function LoginScreen( { navigation }) {
         console.log("Saved prefs: ", savedPrefs);     
     };
 
-    const isJoinDisabled = tempCode.trim().length === 0 || loading;
-
-    // if (!isConnected) {
-    //     return (
-    //         <View style={[styles.container, {justifyContent: 'center', flex: 1}]}>
-    //             <StatusBar barStyle="dark-content" /> 
-    //             <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-    //                 <Text style={{ fontSize: 22, fontWeight: 'bold', color: 'red', textAlign: 'center' }}>
-    //                 The server is offline. Please try again later.
-    //                 </Text>
-    //             </View>
-    //         </View>
-    //     );
-    // }
+    const isJoinDisabled = tempCode.trim().length === 0 || isLoading;
 
     return (
         <View style={{ flex: 1, backgroundColor: '#ffffff', overflow: 'hidden' }} {...panResponder.panHandlers}>
@@ -143,10 +130,10 @@ export default function LoginScreen( { navigation }) {
                             ]
                         ]} 
                         onPress={createNewSession}
-                        disabled={loading}
+                        disabled={isLoading}
                     >
                         <Text style={[styles.buttonText, {fontSize: 40, textAlign: 'center' }]}>
-                            {loading ? "Creating..." : "New Session"}
+                            {isLoading ? "Creating..." : "New Session"}
                         </Text>
                     </Pressable>
 
@@ -162,7 +149,7 @@ export default function LoginScreen( { navigation }) {
                             ]
                         ]} 
                         onPress={showJoinInput}
-                        disabled={loading}
+                        disabled={isLoading}
                     >
                         <Text style={[styles.buttonText, {fontSize: 40}]}>Join Session</Text>
                     </Pressable>
@@ -199,13 +186,11 @@ export default function LoginScreen( { navigation }) {
                     </View>
                     {/* END HEADER */}
 
-                    <View style={[styles.contentWrapper, { flex: 1, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 230 }]}>
+                    <View style={[styles.contentWrapper, { flex: 1, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 200 }]}>
                         {/* error message display */}
-                        {errorMsg !== "" && (
-                            <Text style={{ color: 'red', fontWeight: 'bold', marginBottom: 10, fontSize: 16 }}>
-                                {errorMsg}
-                            </Text>
-                        )}
+                        <Text style={{ color: 'red', fontWeight: 'bold', marginBottom: 10, fontSize: 16 }}>
+                            {errorMsg}
+                        </Text>
 
                         {/* input box */}
                         <TextInput
@@ -249,12 +234,12 @@ export default function LoginScreen( { navigation }) {
                         >
                             <View style={{ height: 60, justifyContent: 'center', alignItems: 'center' }}>
                                 <Text style={[styles.buttonText, { 
-                                    fontSize: loading ? 32 : 40, 
+                                    fontSize: isLoading ? 32 : 40, 
                                     lineHeight: 45, 
                                     textAlignVertical: 'center', 
                                     includeFontPadding: false 
                                     }]}>
-                                    {loading ? "Joining..." : "Submit"}
+                                    {isLoading ? "Joining..." : "Submit"}
                                 </Text>
                             </View>
                         </Pressable>

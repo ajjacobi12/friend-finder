@@ -1,5 +1,5 @@
 // frontend/src/features/home/HomeScreen.js
-import React, { useCallback } from 'react'; 
+import { useCallback } from 'react'; 
 import { Text, View, StatusBar, FlatList, Pressable, Button } from 'react-native'; 
 import TextTicker from 'react-native-text-ticker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,8 +20,8 @@ export default function HomeScreen({ navigation }) {
     // ---- STATE VARIABLES -----
     // app memory (state) to store the server's message
     // whenever "set" function is called, React Native automatically re-renders (refreshes) the screen to show the new info
-    const { name, selectedColor, sessionID, isHost, friends, socket } = useUser(); // Added socket here for the hiccup test
-    const { endSessionForAll, removeUser, handleTransferHost, leaveSession, 
+    const { name, color, sessionID, isHost, friends, socket } = useUser(); // Added socket here for the hiccup test
+    const { endSessionForAll, removeUser, handleTransferHost, leaveSession, modalTransferHost,
         showTransfer, setShowTransfer } = useHomeLogic();  
 
     const insets = useSafeAreaInsets();
@@ -131,8 +131,8 @@ export default function HomeScreen({ navigation }) {
                     {/* --- MY USERNAME AND COLOR ---- */}
                     <View style={[styles.friendBadge, 
                         { 
-                            borderColor: selectedColor, 
-                            backgroundColor: selectedColor + '25', 
+                            borderColor: color, 
+                            backgroundColor: color + '25', 
                             borderWidth: 3, 
                             paddingLeft: 10
                         }]}>
@@ -196,7 +196,7 @@ export default function HomeScreen({ navigation }) {
                 visible={showTransfer}
                 onClose={() => setShowTransfer(false)}
                 friends={friends}
-                onTransfer={handleTransferHost}
+                onTransfer={modalTransferHost}
             />
 
         </View>

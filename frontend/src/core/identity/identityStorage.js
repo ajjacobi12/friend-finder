@@ -2,8 +2,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const KEYS = { 
-    USER_IDENTITY: 'user_identity', 
-    USER_PREFS: 'user_prefs' 
+    IDENTITY: 'user_identity', 
+    PREFS: 'user_prefs' 
 };
 
 export const identityStorage = {

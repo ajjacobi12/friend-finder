@@ -16,16 +16,16 @@ const io = require('socket.io')(http, {
 }); // imports socket.io (tool for real-time, two-way communication), and attaches it to "http" server
 
 // set up the "static folder"
-app.use(express.static('public')); // tells Express, "if anyoneasks for a file (eg. image, CSS file, or html page), look inside a folder named public". This is howto "serve" the frontend code to the user's browser
+app.use(express.static('public')); // tells Express, "if anyone asks for a file (eg. image, CSS file, or html page), look inside a folder named public". This is howto "serve" the frontend code to the user's browser
+
+const { MAX_SESSION_CAPACITY } = require('./constants/sessionConstants');
+const clean = require('./services/dataCleaner');
+const { handleEvent } = require('./services/serverUtils');
 
 // object to store users { "socketID", name: ...,  color: ..., isHost: ...}
 const activeUsers = {}; // key: , value: {name, color, socketID, etc.}
 const socketToUUID = {}; // key: socketID, value: UUID (for quick lookup)
 const activeSessions = {}; // tracks active session IDs
-const maxSessionCapacity = 12;
-
-const clean = require('./services/dataCleaner');
-const { handleEvent } = require('./services/serverUtils');
 
 // when requiring a folder it automatically looks for a file called index.js
 const sessionService = require('./services/session')(
@@ -33,7 +33,7 @@ const sessionService = require('./services/session')(
     activeUsers, 
     activeSessions, 
     socketToUUID,
-    maxSessionCapacity
+    MAX_SESSION_CAPACITY
 );
 
 const chat = require('./handlers/chatHandlers');
@@ -41,7 +41,7 @@ const login = require('./handlers/loginHandlers')(sessionService);
 const home = require('./handlers/homeHandlers')(io, sessionService);
 const profile = require('./handlers/profileHandlers')(sessionService);
 
-const disconnect = require('./handlers/disconnectHandler');
+const disconnect = require('./handlers/disconnectHandler')(sessionService, socketToUUID);
 
 // --- IDENTITY MIDDLEWARE ---
 // Only runs once at the start, won't have the verified properties attached to them yet.

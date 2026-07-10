@@ -35,12 +35,13 @@ export const socketListenersHelpers = (config) => {
     };
 
     // --------------------------- onDISCONNECT -------------------
-    const showDisconnectionOverlay = (isReconnecting, isConnected) => {
+    const showDisconnectionOverlay = () => {
         if (showOverlayTimeoutRef.current) clearTimeout(showOverlayTimeoutRef.current);
         showOverlayTimeoutRef.current = setTimeout(() => {
-            if (!isConnected) {
+            if (!stateRef.current.isConnected) {
                 setIsReconnecting(true);
-                console.log("[DISCONNECT] Showing disconnection overlay. isReconnectingRef:", isReconnecting);
+                stateRef.current.isReconnecting = true;
+                console.log("[DISCONNECT] Showing disconnection overlay. isReconnectingRef:", stateRef.current.isReconnecting);
             }
             // remove overlay once timer finishes
             showOverlayTimeoutRef.current = null;
@@ -50,44 +51,49 @@ export const socketListenersHelpers = (config) => {
     // ------------------- onUSERUPDATE -------------------
     // sound & notification logic for user joining/leaving
     const playJoinSound = () => {
-        if (player.playing) {
+        if (player) {
             player.seekTo(0); // restart sound if already playing
+            player.play();
         }
-        player.play();
     };
 
     const joinAndLeaveLogic = (newUsers, oldUsers) => {
-        // user joining notification & sound logic
+        // user joining
         const { userUUID } = stateRef.current;
         if (newUsers.length > oldUsers.length && oldUsers.length !== 0) {
             const joinedUser = newUsers.find(u => !oldUsers.some(p => p.uuid === u.uuid));
-            // notify only if joined user is not self
+
             if (joinedUser && joinedUser.uuid !== userUUID) {
                 playJoinSound();
-                emitUserJoined({ 
-                    title: `👤 ${joinedUser.name} `, 
-                    message: "has joined the session.",
-                    type: 'info'
-                });
+                setTimeout(() => {
+                    emitUserJoined({ 
+                        title: `👤 ${joinedUser.name}`, 
+                        message: "has joined the session.",
+                        type: 'info'
+                    });
+                }, 0);
             }
         }
 
-        // user leaving notification & sound logic
+        // user leaving
         if (newUsers.length < oldUsers.length) {
             const leftUser = oldUsers.find(p => !newUsers.some(u => u.uuid === p.uuid));
-            // notify only if left user is not self
+
             if (leftUser) {
-                emitUserLeft({ 
-                    title: `👤 ${leftUser.name} `, 
-                    message: "has left the session.",
-                    type: 'info'
-                });
+                setTimeout(() => {
+                    emitUserLeft({ 
+                        title: `👤 ${leftUser.name}`, 
+                        message: "has left the session.",
+                        type: 'info'
+                    });
+                }, 0);
             }
         }
     };
 
     // ------------------- GENERAL MESSAGING -------------------
-    const getSenderName = (sessionUsers, senderUUID) => {
+    const getSenderName = (senderUUID) => {
+        const { sessionUsers } = stateRef.current;
         const sender = sessionUsers.find(f => f.uuid === senderUUID);
         const name = sender ? desanitize(sender.name) : "Someone";
 
@@ -99,8 +105,6 @@ export const socketListenersHelpers = (config) => {
         setChatHistory(prev => {
             const roomMsgs = prev[chatRoomID] || [];
 
-            // if local version of message received already exists (which theoretically should never happen)
-            //     then update it. If not, then add it
             return {
                 ...prev,
                 [chatRoomID]: { ...roomMsgs, [msgID]: { ...(roomMsgs[msgID] || {}), ...msgData }}
@@ -111,35 +115,43 @@ export const socketListenersHelpers = (config) => {
     const handleUnreadMsg = (chatRoomID, activeRoom, name, msgData) => {
         if (chatRoomID !== activeRoom) {
             setUnreadRooms(prev => {
-                // if the room is already in unread list, do nothing
                 if (prev.includes(chatRoomID)) return prev;
-                // otherwise add it to the list
                 return [...prev, chatRoomID];
             });
             const isDM = chatRoomID.includes('_');
-            emitMsg({
-                title: isDM ? (`👤 ${name}`) : (`💬 ${name}`), 
-                message: msgData.context.text,
-                chatRoomID: chatRoomID,
-                isDM: isDM,
-                type: 'info'
-            });
+            setTimeout(() => {
+                emitMsg({
+                    title: isDM ? (`👤 ${name}`) : (`💬 ${name}`), 
+                    message: msgData.context.text,
+                    chatRoomID: chatRoomID,
+                    isDM: isDM,
+                    type: 'info'
+                });
+            }, 0);
         }
     };
 
     // ------------------- onHOSTCHANGE -------------------
-    const handleHostChange = (userUUID, newHostUUID, isHost) => {
-        const amIHost = userUUID === newHostUUID;
+    const handleHostChange = (newHostUUID) => {
+        const { userUUID, isHost } = stateRef.current;
 
+        if (justCreatedSession.current) return;
+
+        const amIHost = userUUID === newHostUUID;
         if (amIHost && !justCreatedSession.current && !isHost) {
-            emitYouAreHost({ 
-                title: "👑 System Update", 
-                message: "You are now the host of this session.",
-                type: 'info'
-            });
+            setTimeout(() => {
+                emitYouAreHost({ 
+                    title: "👑 System Update", 
+                    message: "You are now the host of this session.",
+                    type: 'info'
+                });
+            })
         } 
-        setIsHost(amIHost);
-        justCreatedSession.current = false;
+
+        setTimeout(() => {
+            setIsHost(amIHost);
+            justCreatedSession.current = false;
+        }, 0);
     };
 
 

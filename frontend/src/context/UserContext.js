@@ -1,7 +1,7 @@
 // frontend/src/context/UserContext.js
 
 // ---- IMPORTS -----
-import React, { useState, useRef, createContext, useContext, useEffect, useMemo } from 'react';
+import { useState, useRef, createContext, useContext, useEffect, useMemo } from 'react';
 
 import socket from '../api/socket';
 
@@ -9,6 +9,9 @@ import { useIdentityManager } from '../core/identity/useIdentityManager';
 import { useChatServices } from '../core/chat/useChatServices'
 import { useSessionLifecycle } from '../core/session/useSessionLifecycle';
 import { useSocketListeners } from '../core/socket/useSocketListeners';
+
+import { RebootOverlay } from './RebootOverlay';
+import { DisconnectOverlay } from './DisconnectOverlay';
 
 // create context object (empty container) to hold global data
 const UserContext = createContext();
@@ -20,7 +23,7 @@ export const UserProvider = ({ children }) => {
 
     // set states
     const [name, setName] = useState('');
-    const [color, setColor] = useState(null);  // used to be "selectedColor" and "setSelectedColor"
+    const [color, setColor] = useState(null); 
     const [hasRegistered, setHasRegistered] = useState(false);
     const [isConnected, setIsConnected] = useState(socket.connected);
     const [sessionID, setSessionID] = useState(null);
@@ -103,17 +106,23 @@ export const UserProvider = ({ children }) => {
         setHasRegistered, socket, isConnected, sessionID, setSessionID, sessionUsers, setSessionUsers,
         handleCleanExit, isHost, setIsHost, chatHistory, setChatHistory, justCreatedSession, userUUID, setUserUUID,
         unreadRooms, setUnreadRooms, markAsRead, friends, isReconnecting, updateLocalMsg,
-        isLoading, setIsLoading, activeRoom, setActiveRoom,
-        finalizeSession, updateDiskPrefs
+        isLoading, setIsLoading, activeRoom, setActiveRoom, isRebooting,
+        finalizeSession, updateDiskPrefs, stateRef
     }), [name, color, hasRegistered, isConnected, isLoading, sessionID, sessionUsers, isHost, isReconnecting, 
         chatHistory, userUUID, friends, activeRoom, handleCleanExit, markAsRead, updateLocalMsg]);
 
     return (
         <UserContext.Provider value={value}>
             {children}
+
+            {isRebooting && <RebootOverlay/> }
+            {!isConnected && 
+                <DisconnectOverlay
+                    isReconnecting={isReconnecting}
+                /> 
+            }
         </UserContext.Provider>
     );
 };
 
-// create "hook" to make using this data easy
 export const useUser = () => useContext(UserContext);

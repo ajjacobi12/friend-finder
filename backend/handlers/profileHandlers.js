@@ -7,7 +7,7 @@ module.exports = (sessionService) => {
             // destructure profile
             const { name, color } = profile;
 
-            const masterUser = sessionService.getMasterUser(user.uuid);
+            const masterUser = sessionService.getUser(user.uuid);
             if (!masterUser) throw new Error('[UPDATE USER] Unable to retrieve user information.');
 
             // update master memory

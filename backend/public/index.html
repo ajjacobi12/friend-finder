@@ -82,7 +82,7 @@
         </div>
         <div class="card">
             <h3>Join Session</h3>
-            <input type="text" id="joinIdInput" class="setup-input" placeholder="Existing Room ID">
+            <input type="text" id="joinIdInput" class="setup-input" placeholder="Existing Room ID" onkeypress="if(event.key==='Enter') joinSession()">
             <button class="btn-join" onclick="joinSession()">Join</button>
         </div>
     </div>

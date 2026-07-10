@@ -1,16 +1,26 @@
 {
   "expo": {
-    "name": "MyApp",
-    "slug": "my-app",
+    "name": "FriendTrackerV2",
+    "slug": "friend-track-v2",
     "version": "1.0.0",
+    "sdkVersion": "54.0.0",
+    "jsEngine": "hermes",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "backgroundColor": "#ffffff",
-    "android": {
+    "ios": {
+      "supportsTablet": true,
+      "jsEngine": "hermes",
       "backgroundColor": "#ffffff"
     },
-    "ios": {
-      "backgroundColor": "#ffffff"
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#ffffff"
+      },
+      "jsEngine": "hermes"
     },
     "plugins": [
       "expo-font",

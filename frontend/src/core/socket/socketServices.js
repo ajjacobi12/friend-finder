@@ -25,7 +25,7 @@ export const secureEmit = (eventName, data) => {
         } 
 
         socket.emit(eventName, finalData, (response) => {
-            console.log(`[secureEmit] Response for ${eventName}:`, response);
+            // console.log(`[secureEmit] Response for ${eventName}:`, response);
             clearTimeout(timeout); // cancel timeout if server responds
             // handle the response
             if (!response){

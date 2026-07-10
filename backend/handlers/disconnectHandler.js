@@ -1,22 +1,34 @@
 // backend/handlers/disconnectHandler.js
 // currently designed so that user stays in session indefinitely until they voluntarily leave or are kicked
 
-module.exports = {
-    handleOnDisconnect: (socket) => { 
-        const { user, sessionID } = socket;
+module.exports = (sessionService, socketToUUID) => {
+    return {
+        handleOnDisconnect: (socket) => { 
+            const userUUID = socket.userUUID || socketToUUID[socket.id];
+            const user = userUUID ? sessionService.getUser(userUUID) : null;
 
-        // system/protocol guards
-        if (!user || !sessionID) return;
+            if (!user) {
+                delete socketToUUID[socket.id];
+                return;
+            }
 
-        // update memoory objects
-        user.status = 'offline';
-        user.lastSeen = Date.now();
+            const sessionID = socket.sessionID || user.sessionID;
 
-        console.info(`[OFFLINE] ${user.name} (Festival Mode). Staying in memory.`);
-        // console.info(`[BLINK] User ${user.name} disconnected. Waiting for grace period...`);
+            // update memory objects
+            sessionService.updateUser(user, {
+                status: 'offline',
+                lastSeen: Date.now()
+            });
 
-        // immediate UI cleanup, stop anytyping indicaters, mark connection status as offline on frontend
-        socket.to(sessionID).emit('user-stop-typing', { senderUUID: user.uuid });
-        socket.to(sessionID).emit('user-status-change', { userUUID: user.uuid, status: 'offline' });
+            console.info(`[OFFLINE] ${user.name} (Festival Mode). Staying in memory.`);
+
+            // immediate UI cleanup, stop anytyping indicaters, mark connection status as offline on frontend
+            socket.to(sessionID).emit('user-stop-typing', { senderUUID: user.uuid });
+            socket.to(sessionID).emit('user-status-change', { userUUID: user.uuid, status: 'offline' });
+
+            sessionService.broadcastUpdate(sessionID, `User ${user.name || "Unknown user"} is offline.`);
+
+            delete socketToUUID[socket.uuid];
+        }
     }
 };
