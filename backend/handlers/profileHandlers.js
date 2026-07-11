@@ -10,29 +10,23 @@ module.exports = (sessionService) => {
             const masterUser = sessionService.getUser(user.uuid);
             if (!masterUser) throw new Error('[UPDATE USER] Unable to retrieve user information.');
 
+            // CAN PROBABLY REMOVE
             // update master memory
-            masterUser.name = name;
-            masterUser.color = color;
-            masterUser.isRegistered = true;
+            // masterUser.name = name;
+            // masterUser.color = color;
+            // masterUser.isRegistered = true;
 
             // refresh socket's badge
-            socket.user = masterUser;
+            // socket.user = masterUser;
 
             // color taken logic
             // returns true if color is taken, false if it's available
             if (sessionService.colorTaken(masterUser.sessionID, masterUser, profile, cb)) return;
 
-            const updatedUser = sessionService.updateUser(masterUser, {
-                ...profile, 
-                isRegistered: true
-            });
-
-            if (!updatedUser) {
-                throw new Error(`[PROFILE UPDATE] Failed: User ${masterUser.uuid} no longer exists in session ${masterUser.sessionID}.`);
-            }
+            masterUser.updateProfile(profile)
 
             cb({ success: true });
-            sessionService.broadcastUpdate(masterUser.sessionID, `User ${masterUser.name} updated their profile.`);
+            sessionService.broadcastUpdate(masterUser.sessionID, `User ${masterUser.getName()} updated their profile.`);
         }
     };
 };

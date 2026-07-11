@@ -1,5 +1,8 @@
 // backend/server.js
 
+const { connectDB } = require('./services/db');
+connectDB();
+
 // import the "engines"
 const express = require('express'); // pulls blueprints for express framework
 const { send } = require('process');
@@ -66,7 +69,7 @@ io.use((socket, next) => {
     // if missing/incorrect, still let user connect for create/join, but don't attach "verified" badge
     if (cleanUserUUID && activeUsers[cleanUserUUID]) {
         const user = activeUsers[cleanUserUUID];
-        user.lastSeen = Date.now();
+        user.setOnline();
 
         // verify user belongs to session
         const isUserInSession = user.sessionID === cleanSessionID;
@@ -80,9 +83,9 @@ io.use((socket, next) => {
             
             // update mapping
             socketToUUID[socket.id] = cleanUserUUID;
-            console.log(`[AUTH] ${user.name} verified for session ${cleanSessionID}`);
+            console.log(`[AUTH] ${user.getName()} verified for session ${cleanSessionID}`);
         } else {
-            console.warn(`[AUTH] Warning: ${user.name} tried to access unauthorized session ${cleanSessionID}`);
+            console.warn(`[AUTH] Warning: ${user.getName()} tried to access unauthorized session ${cleanSessionID}`);
         }
     }
 

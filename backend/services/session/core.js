@@ -12,13 +12,7 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID) => {
         // map users to "safe" version before emitting (no socketID)
         const usersInSession = Object.values(activeUsers)
             .filter(u => u.sessionID === sessionID && u.isRegistered)
-            .map(u => ({
-                uuid: u.uuid,
-                name: u.name,
-                color: u.color,
-                isHost: u.isHost,
-                status: u.status || 'online'
-            }));
+            .map(u => u.toJSON());
 
         io.to(sessionID).emit('user-update', usersInSession);
 
@@ -33,21 +27,16 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID) => {
     // deletes user's information from memory
     const purgeUser = (userUUID, sessionID, socket) => {
         if (!socket && !userUUID) return false;
-
         // ensure socket exists before cleaning
         if (socket) {
             socket.leave(sessionID);
-
             // if UUID has been assigned, clean user data
             if (userUUID) {
                 socket.leave(userUUID);
-                
                 delete activeUsers[userUUID];
             }
-
             delete socketToUUID[socket.id];
         }
-
         return true;
     };
 
@@ -114,23 +103,13 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID) => {
         handleSessionCleanup,
         getSession,
 
-        // -------------------------------------- PROFILE HELPERS --------------------------------------
-        updateUser: (user, data) => {
-            if (!activeUsers[user.uuid]) return null;
-
-            return activeUsers[user.uuid] = { 
-                ...user, 
-                ...data
-            };
-        },
-
         // -------------------------------------- HOME HELPERS --------------------------------------
         getUser: (uuid, sessionID = null) => {
             const user = activeUsers[uuid];
-            // return null if user doesn't exist or are in a different session
             if (!user) return null;
             if (sessionID && user.sessionID !== sessionID) return null;
-            return {...user};
+
+            return user;
         },
 
         // ensure session always has a host (host leaves without selecting new host or disconnect)

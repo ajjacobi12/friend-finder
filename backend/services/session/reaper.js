@@ -22,7 +22,7 @@ module.exports = (io, activeUsers, activeSessions, core) => {
             const timeSinceLastSeen = now - (user.lastSeen || 0);
 
             if (!isOnline && timeSinceLastSeen > EXPIRATION_TIME) {
-                console.log(`[REAPER] Expiring stale user: ${user.name} (${uuid})`);
+                console.log(`[REAPER] Expiring stale user: ${user.getName()} (${uuid})`);
                 
                 const sID = user.sessionID;
                 affectedSessions.add(sID);

@@ -1,6 +1,6 @@
-//backend/classes/User.js
+//frontend/src/classes/User.js
 
-class User {
+export class User {
     constructor( data ) {
         this.uuid = data.uuid;
         this.socketID = data.socketID;
@@ -47,5 +47,3 @@ class User {
         };
     }
 }
-
-module.exports = User;

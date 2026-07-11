@@ -1,6 +1,7 @@
 // backend/services/session/auth.js
 // handles logic of getting into system
 const crypto = require('crypto');
+const User = require('../../classes/User');
 
 module.exports = (io, activeUsers, activeSessions, socketToUUID, MAX_SESSION_CAPACITY, core) => {
     // -------------------------------------- LOGIN HELPERS --------------------------------------
@@ -86,14 +87,15 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID, MAX_SESSION_CAP
             // --- RECONNECTION ---
             const isReconnecting = !!activeUsers[userUUID];
             if (isReconnecting) {
+                const user = activeUsers[userUUID];
+
                 // if a reconnection, update the new socket line, keep all old information
-                activeUsers[userUUID].socketID = socket.id;
-                activeUsers[userUUID].sessionID = sessionID;
-                activeUsers[userUUID].lastSeen = Date.now();
-                activeUsers[userUUID].status = 'online';
+                user.socketID = socket.id;
+                user.sessionID = sessionID;
+                user.setOnline();
             } else {
                 // if not reconnecting and is a new user, create profile
-                activeUsers[userUUID] = {
+                activeUsers[userUUID] = new User({
                     uuid: userUUID,
                     socketID: socket.id,
                     name: profile?.name || null,
@@ -102,9 +104,7 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID, MAX_SESSION_CAP
                     // if no host exists, this person is the host
                     isHost: !hasHost,
                     isRegistered: false,
-                    lastSeen: Date.now(),
-                    status: 'online'
-                };
+                });
             }
 
             // --- FINALIZE CONNECTION ---
@@ -116,7 +116,7 @@ module.exports = (io, activeUsers, activeSessions, socketToUUID, MAX_SESSION_CAP
             activeSessions[sessionID] = core.getSession(sessionID) || { hostUUID: activeUsers[userUUID].isHost ? userUUID : null };
 
             const user = activeUsers[userUUID];
-            core.broadcastUpdate(sessionID, isReconnecting ? `[handleUserJoining] User ${user.name} reconnected.` : `[handleUserJoining] User ${user.name || user.uuid} joined.`);
+            core.broadcastUpdate(sessionID, isReconnecting ? `[handleUserJoining] User ${user.getName()} reconnected.` : `[handleUserJoining] User ${user.getName()} joined.`);
 
             if (user.isHost && !isReconnecting) {
                 io.to(sessionID).emit('host-change', userUUID);

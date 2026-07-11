@@ -1,60 +1,74 @@
-// chatHandlers.js
-const { getChatRoomData } = require('../services/serverUtils');
+// backend/handlers/chatHandlers.js
+const Message = require('../classes/Message');
+const MessageModel = require('../models/Message');
 
 // --- MESSAGING ----
-const formatInboundMessage = (user, chatRoomID, context, msgID) => ({
-    chatRoomID,
-    msgID,
-    senderUUID: user.uuid,
-    context: {
-        text: context.text || "",
-        isEncrypted: context.isEncrypted || false,
-        version: context.version || "1.0"
-    },
-    serverTimestamp: Date.now()
-});
-
 const handleSendMsg = async ({ msgID, chatRoomID, context }, { user, socket }, cb) => {
     
+    const message = new Message({
+        msgID,
+        chatRoomID,
+        senderUUID: user.uuid,
+        ...context
+    });
+
+    // save message to database
+    try {
+        const dbMessage = new MessageModel(message); // convert to DB format
+        await dbMessage.save(); // sends it to cloud
+    } catch (err) {
+        console.error("DB save error:", err);
+        return cb({ success: false, error: "Failed to save message." });
+    }
+
     // protocol/system guards
-    // messageData.chatRoomID is either Auuid_Buuid or sessionID
+    // chatRoomID is either Auuid_Buuid or sessionID
     // targetChatRoom is the uuid of the DM recipient or the sessionID
-    const { targetChatRoom, isDM } = getChatRoomData(chatRoomID, user.uuid);
+    const targetChatRoom = message.getBroadcastRoom();
     if(!targetChatRoom) throw new Error("targetChatRoom unable to be retrived.");
 
-    if (!isDM && user.sessionID !== chatRoomID) {
+    if (!message.isDM && user.sessionID !== chatRoomID) {
         return cb({ success: false, error: "Unauthorized: Session mismatch." });
     }
 
-    // reconstruct package, don't just send 'outboundData', only emit what's necessary
-    const formattedMessage = formatInboundMessage(
-        user, 
-        chatRoomID, 
-        context,
-        msgID
-    );
-
     // send message to everyone but sender
-    socket.to(targetChatRoom).emit('receive-message', formattedMessage);
+    socket.to(targetChatRoom).emit('receive-message', message);
     cb({ 
         success: true, 
         msgID,
-        serverTimestamp: formattedMessage.serverTimestamp 
+        serverTimestamp: message.serverTimestamp 
     });
 
-    console.log(`[${isDM ? `DM` : `CHAT`}] ${user.name} -> ${targetChatRoom}: ${context.text}`);
+    console.log(`[${message.isDM ? `DM` : `CHAT`}] ${user.getName()} -> ${targetChatRoom}: ${context.text}`);
     // console.log("data being sent to receive-message: ", outboundData);
 };
 
 const handleEditMsg = async ({ msgID, chatRoomID, newText }, { user, socket }, cb) => {
     
-    const { targetChatRoom } = getChatRoomData(chatRoomID, user.uuid);
+    // update message in database
+    const message = await MessageModel.findOneAndUpdate(
+        { msgID: msgID },
+        {
+            $set: {
+                text: newText,
+                isEdited: true
+            }
+        },
+        { new: true } // return updated document
+    );
+    if (!message) {
+        return cb({ success: false, error:"Message not found. Unable to be edited."});
+    };
+
+    // send update to frontend
+    const targetChatRoom = Message.getBroadcastTarget(chatRoomID, user.uuid);
     if(!targetChatRoom) throw new Error("targetChatRoom unable to be retrived.");
 
     socket.to(targetChatRoom).emit('message-edited', {
         chatRoomID,
         msgID,
-        newText
+        newText,
+        isEdited: true
     });
 
     cb({ success: true });
@@ -63,7 +77,21 @@ const handleEditMsg = async ({ msgID, chatRoomID, newText }, { user, socket }, c
 
 const handleDeleteMsg = async ({ msgID, chatRoomID }, { user, socket }, cb) => {
 
-    const { targetChatRoom } = getChatRoomData(chatRoomID, user.uuid);
+    // detete in database
+    const message = await MessageModel.findOneAndUpdate(
+        { msgID: msgID },
+        {
+            $set: {
+                text: "deleted",
+                isDeleted: true
+            }
+        }
+    );
+    if (!message) {
+        return cb({ success: false, error: "Message not found. Cannot be deleted." });
+    }
+
+    const targetChatRoom = Message.getBroadcastTarget(chatRoomID, user.uuid);
     if(!targetChatRoom) throw new Error("targetChatRoom unable to be retrieved.");
 
     socket.to(targetChatRoom).emit('message-deleted', {
@@ -73,12 +101,12 @@ const handleDeleteMsg = async ({ msgID, chatRoomID }, { user, socket }, cb) => {
     });
 
     cb({ success: true });
-    console.log(`[DELETE] Chat room ${chatRoomID} | Message ${msgID} deleted by ${user.name}`);
+    console.log(`[DELETE] Chat room ${chatRoomID} | Message ${msgID} deleted by ${user.getName()}`);
 };
 
 const handleTyping = async ({ chatRoomID }, { user, socket }, cb) => {
 
-    const { targetChatRoom } = getChatRoomData(chatRoomID, user.uuid);
+    const targetChatRoom = Message.getBroadcastTarget(chatRoomID, user.uuid);
     if (!targetChatRoom) return;
 
     // data.chatRoomID is either sessionID or DMRoomID
@@ -90,7 +118,7 @@ const handleTyping = async ({ chatRoomID }, { user, socket }, cb) => {
 
 const handleStopTyping = async ({ chatRoomID }, { user, socket }, cb) => {
 
-    const { targetChatRoom } = getChatRoomData(chatRoomID, user.uuid);
+    const targetChatRoom = Message.getBroadcastTarget(chatRoomID, user.uuid);
     if(!targetChatRoom) return;
 
     socket.to(targetChatRoom).emit('user-stop-typing', {

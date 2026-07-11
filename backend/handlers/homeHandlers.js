@@ -16,13 +16,11 @@ module.exports = (io, sessionService) => {
                 if (!newHostFound) console.warn(`[HOST] No one left to take over. Room is hostless.`);
             }
 
-            const userName = masterUser.name;
-
             const purged = sessionService.purgeUser(user.uuid, sessionID, socket);
-            if (!purged) throw new Error (`User ${userName} was unable to be purged.`);
+            if (!purged) throw new Error (`User ${masterUser.getName()} was unable to be purged.`);
 
             cb({ success: true });
-            sessionService.broadcastUpdate(sessionID, `User ${userName || "Unknown User"} left.`);
+            sessionService.broadcastUpdate(sessionID, `User ${masterUser.getName()} left.`);
             
             setTimeout(() => {
                 sessionService.handleSessionCleanup(sessionID);
@@ -35,9 +33,9 @@ module.exports = (io, sessionService) => {
 
             if (!masterUser) throw new Error('[LEAVE SESSION] Unable to retrieve user information.');
             if (masterUser.sessionID !== sessionID) throw new Error (`User is not in session ${sessionID}.`);
-            if (!masterUser.isHost) throw new Error(`Unauthorized attempt by ${masterUser.name || socket.id} to end session.`);
+            if (!masterUser.isHost) throw new Error(`Unauthorized attempt by ${masterUser.getName()} to end session.`);
 
-            console.log(`Host ${masterUser.name} is ending session ${sessionID}`);
+            console.log(`Host ${masterUser.getName()} is ending session ${sessionID}`);
             io.to(sessionID).emit('session-ended');
 
             const purged = sessionService.purgeSession(sessionID);
@@ -52,12 +50,10 @@ module.exports = (io, sessionService) => {
             const masterUser = sessionService.getUser(user.uuid);
 
             if (!masterUser) throw new Error('[LEAVE SESSION] Unable to retrieve user information.');
-            if (!masterUser.isHost) throw new Error(`[REMOVE USER] Unauthorized attempt by ${masterUser.name || socket.id} to remove user.`);
+            if (!masterUser.isHost) throw new Error(`[REMOVE USER] Unauthorized attempt by ${masterUser.getName()} to remove user.`);
 
             const targetUser = sessionService.getUser(userUUIDToRemove, sessionID);
             if (!targetUser) return cb({ success: true });
-
-            const targetName = targetUser.name || "User";
 
             // force victim socket to leave session
             // keep in mind: if target user is disconnected (eg. after 15s reconnection grace period)
@@ -67,10 +63,10 @@ module.exports = (io, sessionService) => {
                 targetSocket.emit('removed-from-session'); 
             }
             const purged = sessionService.purgeUser(userUUIDToRemove, sessionID, targetSocket);
-            if (!purged) throw new Error (`[REMOVE USER] User ${targetName} was unable to be purged.`);
+            if (!purged) throw new Error (`[REMOVE USER] User ${targetUser.getName()} was unable to be purged.`);
 
             cb({ success: true });
-            sessionService.broadcastUpdate(sessionID, `User (${targetName || `User`}) was removed by the host.`);
+            sessionService.broadcastUpdate(sessionID, `User (${targetUser.getName()}) was removed by the host.`);
             
             sessionService.handleSessionCleanup(sessionID);
         },
@@ -84,7 +80,7 @@ module.exports = (io, sessionService) => {
             if (!session) throw new Error('[TRANSFER HOST] Unable to retrieve session information.');
             if (!masterUser) throw new Error('[TRANSFER HOST] Unable to retrieve user information.');
             if (!targetUser) throw new Error(`[TRANSFER HOST] Transfer failed: unable to retrieve target user ${newHostUUID} information.`);
-            if (!masterUser.isHost ) throw new Error(`[TRANSFER HOST] Unauthorized transfer attempt by ${masterUser?.name || socket.id}`);
+            if (!masterUser.isHost ) throw new Error(`[TRANSFER HOST] Unauthorized transfer attempt by ${masterUser?.getName()}`);
 
             const targetSocket = io.sockets.sockets.get(targetUser.socketID);
             if (!targetSocket) console.log(`[TRANSFER HOST] target user ${newHostUUID} socket not found in session. User is offline.`);
@@ -94,14 +90,14 @@ module.exports = (io, sessionService) => {
             masterUser.isHost = false;
             targetUser.isHost = true;
             
-            socket.user = masterUser;
-            if (targetSocket) {
-                targetSocket.user = targetUser; 
-            }
+            // socket.user = masterUser;
+            // if (targetSocket) {
+            //     targetSocket.user = targetUser; 
+            // }
 
             io.to(sessionID).emit('host-change', newHostUUID);
             cb({ success: true });
-            sessionService.broadcastUpdate(sessionID, `${targetUser.name} is now the host.`);
+            sessionService.broadcastUpdate(sessionID, `${targetUser.getName()} is now the host.`);
         }
 
     };

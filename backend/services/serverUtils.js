@@ -1,22 +1,6 @@
 // backend/services/serverUtils.js
 const clean = require('./dataCleaner');
 
-// -------------------------------------- CHAT HELPERS --------------------------------------
-// helper to get target chat room for start/stopping typing
-const getChatRoomData = (chatRoomID, senderUUID) => {
-    if (!chatRoomID || typeof chatRoomID !== 'string') return { targetChatRoom: null, isDM: false };
-
-    const isDM = chatRoomID.includes('_');
-    const targetChatRoom = isDM 
-    ? chatRoomID.split('_').find(uuid => uuid !== senderUUID)
-    : chatRoomID;
-
-    // Safety check: if it's a DM but we couldn't find the 'other' UUID
-    if (!targetChatRoom) return { targetChatRoom: null, isDM };
-
-    return { targetChatRoom, isDM };
-};
-
 // -------------------------------------- DATA CLEANING HELPERS --------------------------------------
 const CLEANING_MAP = {
     existingUUID: (val) => clean.userUUID(val),
@@ -136,7 +120,6 @@ const handleEvent = (eventName, socket, requiredFields, logic, isAuthRequired = 
 };
 
 module.exports = {
-    getChatRoomData,
     checkCleanData,
     handleEvent
 };

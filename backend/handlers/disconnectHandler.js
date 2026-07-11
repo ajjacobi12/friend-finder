@@ -14,11 +14,7 @@ module.exports = (sessionService, socketToUUID) => {
 
             const sessionID = socket.sessionID || user.sessionID;
 
-            // update memory objects
-            sessionService.updateUser(user, {
-                status: 'offline',
-                lastSeen: Date.now()
-            });
+            user.setOffline();
 
             console.info(`[OFFLINE] ${user.name} (Festival Mode). Staying in memory.`);
 
@@ -26,7 +22,7 @@ module.exports = (sessionService, socketToUUID) => {
             socket.to(sessionID).emit('user-stop-typing', { senderUUID: user.uuid });
             socket.to(sessionID).emit('user-status-change', { userUUID: user.uuid, status: 'offline' });
 
-            sessionService.broadcastUpdate(sessionID, `User ${user.name || "Unknown user"} is offline.`);
+            sessionService.broadcastUpdate(sessionID, `User ${user.getName()} is offline.`);
 
             delete socketToUUID[socket.uuid];
         }
